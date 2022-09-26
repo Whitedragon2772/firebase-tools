@@ -1,12 +1,10 @@
-import * as _ from "lodash";
-import * as clc from "cli-color";
+import * as clc from "colorette";
 import * as ora from "ora";
 
 import { Client } from "../apiv2";
 import { FirebaseError } from "../error";
 import { pollOperation } from "../operation-poller";
-import { promptOnce } from "../prompt";
-import { Question } from "inquirer";
+import { Question, promptOnce } from "../prompt";
 import * as api from "../api";
 import { logger } from "../logger";
 import * as utils from "../utils";
@@ -84,7 +82,7 @@ export async function createFirebaseProjectAndLog(
   try {
     await createCloudProject(projectId, options);
     spinner.succeed();
-  } catch (err) {
+  } catch (err: any) {
     spinner.fail();
     throw err;
   }
@@ -100,7 +98,7 @@ export async function addFirebaseToCloudProjectAndLog(
 
   try {
     projectInfo = await addFirebaseToCloudProject(projectId);
-  } catch (err) {
+  } catch (err: any) {
     spinner.fail();
     throw err;
   }
@@ -168,15 +166,15 @@ async function selectProjectByPrompting(): Promise<FirebaseProjectMetadata> {
 async function selectProjectFromList(
   projects: FirebaseProjectMetadata[] = []
 ): Promise<FirebaseProjectMetadata> {
-  let choices = projects
+  const choices = projects
     .filter((p: FirebaseProjectMetadata) => !!p)
     .map((p) => {
       return {
         name: p.projectId + (p.displayName ? ` (${p.displayName})` : ""),
         value: p.projectId,
       };
-    });
-  choices = _.orderBy(choices, ["name"], ["asc"]);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   if (choices.length >= 25) {
     utils.logBullet(
@@ -228,7 +226,7 @@ export async function promptAvailableProjectId(): Promise<string> {
       message: "Please input the ID of the Google Cloud Project you would like to add Firebase:",
     });
   } else {
-    let choices = projects
+    const choices = projects
       .filter((p: CloudProjectInfo) => !!p)
       .map((p) => {
         const projectId = getProjectId(p);
@@ -236,8 +234,8 @@ export async function promptAvailableProjectId(): Promise<string> {
           name: projectId + (p.displayName ? ` (${p.displayName})` : ""),
           value: projectId,
         };
-      });
-    choices = _.orderBy(choices, ["name"], ["asc"]);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
     return await promptOnce({
       type: "list",
       name: "id",
@@ -257,13 +255,18 @@ export async function createCloudProject(
   options: { displayName?: string; parentResource?: ProjectParentResource }
 ): Promise<any> {
   try {
-    const response = await api.request("POST", "/v1/projects", {
-      auth: true,
-      origin: api.resourceManagerOrigin,
+    const client = new Client({ urlPrefix: api.resourceManagerOrigin, apiVersion: "v1" });
+    const data = {
+      projectId,
+      name: options.displayName || projectId,
+      parent: options.parentResource,
+    };
+    const response = await client.request<any, { name: string }>({
+      method: "POST",
+      path: "/projects",
+      body: data,
       timeout: CREATE_PROJECT_API_REQUEST_TIMEOUT_MILLIS,
-      data: { projectId, name: options.displayName || projectId, parent: options.parentResource },
     });
-
     const projectInfo = await pollOperation<any>({
       pollerName: "Project Creation Poller",
       apiOrigin: api.resourceManagerOrigin,
@@ -271,7 +274,7 @@ export async function createCloudProject(
       operationResourceName: response.body.name /* LRO resource name */,
     });
     return projectInfo;
-  } catch (err) {
+  } catch (err: any) {
     if (err.status === 409) {
       throw new FirebaseError(
         `Failed to create project because there is already a project with ID ${clc.bold(
@@ -300,9 +303,9 @@ export async function addFirebaseToCloudProject(
   projectId: string
 ): Promise<FirebaseProjectMetadata> {
   try {
-    const response = await api.request("POST", `/v1beta1/projects/${projectId}:addFirebase`, {
-      auth: true,
-      origin: api.firebaseApiOrigin,
+    const response = await firebaseAPIClient.request<any, { name: string }>({
+      method: "POST",
+      path: `/projects/${projectId}:addFirebase`,
       timeout: CREATE_PROJECT_API_REQUEST_TIMEOUT_MILLIS,
     });
     const projectInfo = await pollOperation<any>({
@@ -312,7 +315,7 @@ export async function addFirebaseToCloudProject(
       operationResourceName: response.body.name /* LRO resource name */,
     });
     return projectInfo;
-  } catch (err) {
+  } catch (err: any) {
     logger.debug(err.message);
     throw new FirebaseError(
       "Failed to add Firebase to Google Cloud Platform project. See firebase-debug.log for more info.",
@@ -366,7 +369,7 @@ export async function getFirebaseProjectPage(
       pageSize,
       pageToken,
     });
-  } catch (err) {
+  } catch (err: any) {
     logger.debug(err.message);
     throw new FirebaseError(
       "Failed to list Firebase projects. See firebase-debug.log for more info.",
@@ -391,7 +394,7 @@ export async function getAvailableCloudProjectPage(
       pageSize,
       pageToken,
     });
-  } catch (err) {
+  } catch (err: any) {
     logger.debug(err.message);
     throw new FirebaseError(
       "Failed to list available Google Cloud Platform projects. See firebase-debug.log for more info.",
@@ -432,7 +435,7 @@ export async function getFirebaseProject(projectId: string): Promise<FirebasePro
       timeout: TIMEOUT_MILLIS,
     });
     return res.body;
-  } catch (err) {
+  } catch (err: any) {
     logger.debug(err.message);
     throw new FirebaseError(
       `Failed to get Firebase project ${projectId}. ` +

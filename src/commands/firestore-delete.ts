@@ -1,6 +1,6 @@
 "use strict";
 
-import * as clc from "cli-color";
+import * as clc from "colorette";
 import { Command } from "../command";
 import { Emulators } from "../emulator/types";
 import { printNoticeIfEmulated } from "../emulator/commandUtils";
@@ -13,7 +13,7 @@ function getConfirmationMessage(deleteOp: FirestoreDelete, options: any) {
   if (options.allCollections) {
     return (
       "You are about to delete " +
-      clc.bold.yellow.underline("THE ENTIRE DATABASE") +
+      clc.bold(clc.yellow(clc.underline("THE ENTIRE DATABASE"))) +
       " for " +
       clc.cyan(options.project) +
       ". Are you sure?"
@@ -65,7 +65,7 @@ function getConfirmationMessage(deleteOp: FirestoreDelete, options: any) {
   );
 }
 
-module.exports = new Command("firestore:delete [path]")
+export const command = new Command("firestore:delete [path]")
   .description("Delete data from Cloud Firestore.")
   .option(
     "-r, --recursive",
@@ -83,7 +83,7 @@ module.exports = new Command("firestore:delete [path]")
     "Delete all. Deletes the entire Firestore database, " +
       "including all collections and documents. Any other flags or arguments will be ignored."
   )
-  .option("-y, --yes", "No confirmation. Otherwise, a confirmation prompt will appear.")
+  .option("-f, --force", "No confirmation. Otherwise, a confirmation prompt will appear.")
   .before(printNoticeIfEmulated, Emulators.FIRESTORE)
   .before(requirePermissions, ["datastore.entities.list", "datastore.entities.delete"])
   .action(async (path: string | undefined, options: any) => {
@@ -101,7 +101,7 @@ module.exports = new Command("firestore:delete [path]")
     const confirm = await promptOnce(
       {
         type: "confirm",
-        name: "yes",
+        name: "force",
         default: false,
         message: getConfirmationMessage(deleteOp, options),
       },

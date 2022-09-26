@@ -1,4 +1,4 @@
-import * as clc from "cli-color";
+import * as clc from "colorette";
 import * as functionsConfig from "../functionsConfig";
 
 import { Command } from "../command";
@@ -16,8 +16,10 @@ import * as planner from "../deploy/functions/release/planner";
 import * as fabricator from "../deploy/functions/release/fabricator";
 import * as executor from "../deploy/functions/release/executor";
 import * as reporter from "../deploy/functions/release/reporter";
+import * as containerCleaner from "../deploy/functions/containerCleaner";
+import { getProjectNumber } from "../getProjectNumber";
 
-export default new Command("functions:delete [filters...]")
+export const command = new Command("functions:delete [filters...]")
   .description("delete one or more Cloud Functions by name or group name.")
   .option(
     "--region <region>",
@@ -33,7 +35,7 @@ export default new Command("functions:delete [filters...]")
 
     const context: args.Context = {
       projectId: needProjectId(options),
-      filters: filters.map((f) => f.split(".")),
+      filters: filters.map((f) => ({ idChunks: f.split(".") })),
     };
 
     const [config, existingBackend] = await Promise.all([
@@ -46,7 +48,10 @@ export default new Command("functions:delete [filters...]")
     if (options.region) {
       existingBackend.endpoints = { [options.region]: existingBackend.endpoints[options.region] };
     }
-    const plan = planner.createDeploymentPlan(/* want= */ backend.empty(), existingBackend, {
+    const plan = planner.createDeploymentPlan({
+      wantBackend: backend.empty(),
+      haveBackend: existingBackend,
+      codebase: "",
       filters: context.filters,
       deleteAll: true,
     });
@@ -89,16 +94,22 @@ export default new Command("functions:delete [filters...]")
     try {
       const fab = new fabricator.Fabricator({
         functionExecutor,
-        executor: new executor.QueueExecutor({}),
         appEngineLocation,
+        executor: new executor.QueueExecutor({}),
+        sources: {},
+        projectNumber:
+          options.projectNumber || (await getProjectNumber({ projectId: context.projectId })),
       });
       const summary = await fab.applyPlan(plan);
       await reporter.logAndTrackDeployStats(summary);
       reporter.printErrors(summary);
-    } catch (err) {
+    } catch (err: any) {
       throw new FirebaseError("Failed to delete functions", {
         original: err as Error,
         exit: 1,
       });
     }
+
+    // Clean up image caches too
+    await containerCleaner.cleanupBuildImages([], allEpToDelete);
   });

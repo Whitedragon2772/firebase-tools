@@ -1,4 +1,4 @@
-import * as clc from "cli-color";
+import * as clc from "colorette";
 import * as ProgressBar from "progress";
 
 import * as apiv2 from "../apiv2";
@@ -446,7 +446,7 @@ export class FirestoreDelete {
       return false;
     };
 
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const intervalId = setInterval(() => {
         if (queueLoop()) {
           clearInterval(intervalId);

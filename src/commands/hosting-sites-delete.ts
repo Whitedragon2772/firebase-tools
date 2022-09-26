@@ -1,4 +1,4 @@
-import { bold, underline } from "cli-color";
+import { bold, underline } from "colorette";
 import { Command } from "../command";
 import { logLabeledSuccess } from "../utils";
 import { getSite, deleteSite } from "../hosting/api";
@@ -6,12 +6,12 @@ import { promptOnce } from "../prompt";
 import { FirebaseError } from "../error";
 import { requirePermissions } from "../requirePermissions";
 import { needProjectId } from "../projectUtils";
-import * as requireConfig from "../requireConfig";
+import { requireConfig } from "../requireConfig";
 import { logger } from "../logger";
 
 const LOG_TAG = "hosting:sites";
 
-export default new Command("hosting:sites:delete <siteId>")
+export const command = new Command("hosting:sites:delete <siteId>")
   .description("delete a Firebase Hosting site")
   .withForce()
   .before(requireConfig)

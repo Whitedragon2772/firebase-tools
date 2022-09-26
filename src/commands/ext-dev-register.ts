@@ -1,5 +1,6 @@
-import * as clc from "cli-color";
-import * as marked from "marked";
+import * as clc from "colorette";
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-var-requires
+const { marked } = require("marked");
 
 import { Command } from "../command";
 import { registerPublisherProfile } from "../extensions/extensionsApi";
@@ -14,7 +15,7 @@ import * as utils from "../utils";
 /**
  * Register a publisher ID; run this before publishing any extensions.
  */
-export default new Command("ext:dev:register")
+export const command = new Command("ext:dev:register")
   .description("register a publisher ID; run this before publishing your first extension.")
   // temporary until registry-specific permissions are available
   .before(requirePermissions, ["firebaseextensions.sources.create"])
@@ -35,7 +36,7 @@ export default new Command("ext:dev:register")
     });
     try {
       await registerPublisherProfile(projectId, publisherId);
-    } catch (err) {
+    } catch (err: any) {
       if (err.status === 409) {
         const error =
           `Couldn't register the publisher ID '${clc.bold(publisherId)}' to the project '${clc.bold(
@@ -52,8 +53,7 @@ export default new Command("ext:dev:register")
       throw new FirebaseError(
         `Failed to register publisher ID ${clc.bold(publisherId)} for project ${clc.bold(
           projectId
-        )}: ${err.message}`,
-        { exit: 1 }
+        )}: ${err.message}`
       );
     }
     return utils.logLabeledSuccess(

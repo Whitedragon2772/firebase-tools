@@ -6,7 +6,7 @@ import { AppDistributionClient } from "../appdistribution/client";
 import { getEmails, getProjectName } from "../appdistribution/options-parser-util";
 import { logger } from "../logger";
 
-module.exports = new Command("appdistribution:testers:remove [emails...]")
+export const command = new Command("appdistribution:testers:remove [emails...]")
   .description("remove testers from a project")
   .option("--file <file>", "a path to a file containing a list of tester emails to be removed")
   .before(requireAuth)
@@ -18,7 +18,7 @@ module.exports = new Command("appdistribution:testers:remove [emails...]")
     try {
       utils.logBullet(`Deleting ${emailsArr.length} testers from project`);
       deleteResponse = await appDistroClient.removeTesters(projectName, emailsArr);
-    } catch (err) {
+    } catch (err: any) {
       throw new FirebaseError(`Failed to remove testers ${err}`);
     }
 

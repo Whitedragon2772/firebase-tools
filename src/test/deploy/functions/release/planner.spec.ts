@@ -4,8 +4,9 @@ import * as sinon from "sinon";
 import * as backend from "../../../../deploy/functions/backend";
 import * as planner from "../../../../deploy/functions/release/planner";
 import * as deploymentTool from "../../../../deploymentTool";
-import * as gcfv2 from "../../../../gcp/cloudfunctionsv2";
 import * as utils from "../../../../utils";
+import * as v2events from "../../../../functions/events/v2";
+import { previews } from "../../../../previews";
 
 describe("planner", () => {
   let logLabeledBullet: sinon.SinonStub;
@@ -15,10 +16,12 @@ describe("planner", () => {
   }
 
   beforeEach(() => {
+    previews.skipdeployingnoopfunctions = true;
     logLabeledBullet = sinon.stub(utils, "logLabeledBullet");
   });
 
   afterEach(() => {
+    previews.skipdeployingnoopfunctions = false;
     sinon.verifyAndRestore();
   });
 
@@ -43,17 +46,15 @@ describe("planner", () => {
     it("throws on illegal updates", () => {
       const httpsFunc = func("a", "b", { httpsTrigger: {} });
       const scheduleFunc = func("a", "b", { scheduleTrigger: {} });
-      expect(() => planner.calculateUpdate(httpsFunc, scheduleFunc)).to.throw;
+      expect(() => planner.calculateUpdate(httpsFunc, scheduleFunc)).to.throw();
     });
 
     it("knows to delete & recreate for v2 topic changes", () => {
       const original: backend.Endpoint = {
         ...func("a", "b", {
           eventTrigger: {
-            eventType: gcfv2.PUBSUB_PUBLISH_EVENT,
-            eventFilters: {
-              resource: "topic",
-            },
+            eventType: v2events.PUBSUB_PUBLISH_EVENT,
+            eventFilters: { topic: "topic" },
             retry: false,
           },
         }),
@@ -61,7 +62,7 @@ describe("planner", () => {
       };
       const changed = JSON.parse(JSON.stringify(original)) as backend.Endpoint;
       if (backend.isEventTriggered(changed)) {
-        changed.eventTrigger.eventFilters["resource"] = "anotherTopic";
+        changed.eventTrigger.eventFilters = { topic: "anotherTopic" };
       }
       expect(planner.calculateUpdate(changed, original)).to.deep.equal({
         endpoint: changed,
@@ -86,10 +87,8 @@ describe("planner", () => {
     it("knows to delete & recreate when trigger regions change", () => {
       const original: backend.Endpoint = func("a", "b", {
         eventTrigger: {
-          eventType: "google.cloud.storage.object.v1.finalzied",
-          eventFilters: {
-            bucket: "mybucket",
-          },
+          eventType: "google.cloud.storage.object.v1.finalized",
+          eventFilters: { bucket: "my-bucket" },
           region: "us-west1",
           retry: false,
         },
@@ -98,9 +97,7 @@ describe("planner", () => {
       const changed: backend.Endpoint = func("a", "b", {
         eventTrigger: {
           eventType: "google.cloud.storage.object.v1.finalzied",
-          eventFilters: {
-            bucket: "bucket2",
-          },
+          eventFilters: { bucket: "my-bucket" },
           region: "us",
           retry: false,
         },
@@ -136,19 +133,150 @@ describe("planner", () => {
       const deleted = func("deleted", "region");
       deleted.labels = deploymentTool.labels();
       const pantheon = func("pantheon", "region");
+      const skipWant = func("skip", "region");
+      skipWant.hash = "skip";
+      const skipHave = func("skip", "region");
+      skipHave.hash = "skip";
 
-      const want = { created, updated };
-      const have = { updated, deleted, pantheon };
+      const want = { created, updated, skip: skipWant };
+      const have = { updated, deleted, pantheon, skip: skipHave };
 
       // note: pantheon is not updated in any way
-      expect(planner.calculateRegionalChanges(want, have, {})).to.deep.equal({
-        endpointsToCreate: [created],
-        endpointsToUpdate: [
-          {
-            endpoint: updated,
-          },
-        ],
-        endpointsToDelete: [deleted],
+      expect(planner.calculateChangesets(want, have, (e) => e.region)).to.deep.equal({
+        region: {
+          endpointsToCreate: [created],
+          endpointsToUpdate: [
+            {
+              endpoint: updated,
+            },
+          ],
+          endpointsToDelete: [deleted],
+          endpointsToSkip: [skipWant],
+        },
+      });
+    });
+
+    it("adds endpoints with matching hashes to skip list", () => {
+      // Note: the two functions share the same id
+      const updatedWant = func("updated", "region");
+      const updatedHave = func("updated", "region");
+      // But their hash are the same (aka a no-op function)
+      updatedWant.hash = "to_skip";
+      updatedHave.hash = "to_skip";
+
+      const want = { updated: updatedWant };
+      const have = { updated: updatedHave };
+
+      expect(planner.calculateChangesets(want, have, (e) => e.region)).to.deep.equal({
+        region: {
+          endpointsToCreate: [],
+          endpointsToUpdate: [],
+          endpointsToDelete: [],
+          endpointsToSkip: [updatedWant],
+        },
+      });
+    });
+
+    it("adds endpoints to update list if they dont have hashes", () => {
+      // Note: the two functions share the same id
+      const updatedWant = func("updated", "region");
+      const updatedHave = func("updated", "region");
+      // Their hashes are not set
+
+      const want = { updated: updatedWant };
+      const have = { updated: updatedHave };
+
+      expect(planner.calculateChangesets(want, have, (e) => e.region)).to.deep.equal({
+        region: {
+          endpointsToCreate: [],
+          endpointsToUpdate: [
+            {
+              endpoint: updatedWant,
+            },
+          ],
+          endpointsToDelete: [],
+          endpointsToSkip: [],
+        },
+      });
+    });
+
+    it("adds endpoints to update list if they have different hashes", () => {
+      // Note: the two functions share the same id
+      const updatedWant = func("updated", "region");
+      const updatedHave = func("updated", "region");
+      // But their hashes are the same (aka a no-op function)
+      updatedWant.hash = "local";
+      updatedHave.hash = "server";
+
+      const want = { updated: updatedWant };
+      const have = { updated: updatedHave };
+
+      expect(planner.calculateChangesets(want, have, (e) => e.region)).to.deep.equal({
+        region: {
+          endpointsToCreate: [],
+          endpointsToUpdate: [
+            {
+              endpoint: updatedWant,
+            },
+          ],
+          endpointsToDelete: [],
+          endpointsToSkip: [],
+        },
+      });
+    });
+
+    it("does not add endpoints to skip list if preview flag is false", () => {
+      // Note: the two functions share the same id
+      const updatedWant = func("updated", "region");
+      const updatedHave = func("updated", "region");
+      // But their hash are the same (aka a no-op function)
+      updatedWant.hash = "to_skip";
+      updatedHave.hash = "to_skip";
+
+      previews.skipdeployingnoopfunctions = false;
+
+      const want = { updated: updatedWant };
+      const have = { updated: updatedHave };
+
+      expect(planner.calculateChangesets(want, have, (e) => e.region)).to.deep.equal({
+        region: {
+          endpointsToCreate: [],
+          endpointsToUpdate: [
+            {
+              endpoint: updatedWant,
+            },
+          ],
+          endpointsToDelete: [],
+          endpointsToSkip: [],
+        },
+      });
+    });
+
+    it("does not add endpoints to skip list if not targeted for deploy", () => {
+      // Note: the two functions share the same id
+      const updatedWant = func("updated", "region");
+      const updatedHave = func("updated", "region");
+      // But their hash are the same (aka a no-op function)
+      updatedWant.hash = "to_skip";
+      updatedHave.hash = "to_skip";
+      updatedWant.targetedByOnly = true;
+
+      previews.skipdeployingnoopfunctions = true;
+
+      const want = { updated: updatedWant };
+      const have = { updated: updatedHave };
+
+      expect(planner.calculateChangesets(want, have, (e) => e.region)).to.deep.equal({
+        region: {
+          endpointsToCreate: [],
+          endpointsToUpdate: [
+            {
+              endpoint: updatedWant,
+            },
+          ],
+          endpointsToDelete: [],
+          endpointsToSkip: [],
+        },
       });
     });
 
@@ -163,19 +291,73 @@ describe("planner", () => {
       const have = { updated, deleted, pantheon };
 
       // note: pantheon is deleted because we have deleteAll: true
-      expect(planner.calculateRegionalChanges(want, have, { deleteAll: true })).to.deep.equal({
-        endpointsToCreate: [created],
-        endpointsToUpdate: [
-          {
-            endpoint: updated,
-          },
-        ],
-        endpointsToDelete: [deleted, pantheon],
+      expect(planner.calculateChangesets(want, have, (e) => e.region, true)).to.deep.equal({
+        region: {
+          endpointsToCreate: [created],
+          endpointsToUpdate: [
+            {
+              endpoint: updated,
+            },
+          ],
+          endpointsToDelete: [deleted, pantheon],
+          endpointsToSkip: [],
+        },
       });
     });
   });
 
   describe("createDeploymentPlan", () => {
+    const codebase = "default";
+
+    it("groups deployment by region and memory", () => {
+      const region1mem1Created: backend.Endpoint = func("id1", "region1");
+      const region1mem1Updated: backend.Endpoint = func("id2", "region1");
+
+      const region2mem1Created: backend.Endpoint = func("id3", "region2");
+      const region2mem2Updated: backend.Endpoint = func("id4", "region2");
+      region2mem2Updated.availableMemoryMb = 512;
+      const region2mem2Deleted: backend.Endpoint = func("id5", "region2");
+      region2mem2Deleted.availableMemoryMb = 512;
+      region2mem2Deleted.labels = deploymentTool.labels();
+
+      const haveBackend = backend.of(region1mem1Updated, region2mem2Updated, region2mem2Deleted);
+      const wantBackend = backend.of(
+        region1mem1Created,
+        region1mem1Updated,
+        region2mem1Created,
+        region2mem2Updated
+      );
+
+      expect(planner.createDeploymentPlan({ wantBackend, haveBackend, codebase })).to.deep.equal({
+        "default-region1-default": {
+          endpointsToCreate: [region1mem1Created],
+          endpointsToUpdate: [
+            {
+              endpoint: region1mem1Updated,
+            },
+          ],
+          endpointsToDelete: [],
+          endpointsToSkip: [],
+        },
+        "default-region2-default": {
+          endpointsToCreate: [region2mem1Created],
+          endpointsToUpdate: [],
+          endpointsToDelete: [],
+          endpointsToSkip: [],
+        },
+        "default-region2-512": {
+          endpointsToCreate: [],
+          endpointsToUpdate: [
+            {
+              endpoint: region2mem2Updated,
+            },
+          ],
+          endpointsToDelete: [region2mem2Deleted],
+          endpointsToSkip: [],
+        },
+      });
+    });
+
     it("applies filters", () => {
       const group1Created = func("g1-created", "region");
       const group1Updated = func("g1-updated", "region");
@@ -188,11 +370,18 @@ describe("planner", () => {
       group1Deleted.labels = deploymentTool.labels();
       group2Deleted.labels = deploymentTool.labels();
 
-      const want = backend.of(group1Updated, group1Created, group2Updated, group2Created);
-      const have = backend.of(group1Updated, group1Deleted, group2Updated, group2Deleted);
+      const wantBackend = backend.of(group1Updated, group1Created, group2Updated, group2Created);
+      const haveBackend = backend.of(group1Updated, group1Deleted, group2Updated, group2Deleted);
 
-      expect(planner.createDeploymentPlan(want, have, { filters: [["g1"]] })).to.deep.equal({
-        region: {
+      expect(
+        planner.createDeploymentPlan({
+          wantBackend,
+          haveBackend,
+          codebase,
+          filters: [{ codebase, idChunks: ["g1"] }],
+        })
+      ).to.deep.equal({
+        "default-region-default": {
           endpointsToCreate: [group1Created],
           endpointsToUpdate: [
             {
@@ -200,6 +389,7 @@ describe("planner", () => {
             },
           ],
           endpointsToDelete: [group1Deleted],
+          endpointsToSkip: [],
         },
       });
     });
@@ -210,39 +400,51 @@ describe("planner", () => {
       const upgraded: backend.Endpoint = { ...original };
       upgraded.platform = "gcfv2";
 
-      const have = backend.of(original);
-      const want = backend.of(upgraded);
+      const haveBackend = backend.of(original);
+      const wantBackend = backend.of(upgraded);
 
       allowV2Upgrades();
-      planner.createDeploymentPlan(want, have);
+      planner.createDeploymentPlan({ wantBackend, haveBackend, codebase });
       expect(logLabeledBullet).to.have.been.calledOnceWith(
         "functions",
         sinon.match(/change this with the 'concurrency' option/)
       );
     });
-  });
 
-  it("does not warn users about concurrency when inappropriate", () => {
-    allowV2Upgrades();
-    // Concurrency isn't set but this isn't an upgrade operation, so there
-    // should be no warning
-    const v2Function: backend.Endpoint = { ...func("id", "region"), platform: "gcfv2" };
+    it("does not warn users about concurrency when inappropriate", () => {
+      allowV2Upgrades();
+      // Concurrency isn't set but this isn't an upgrade operation, so there
+      // should be no warning
+      const v2Function: backend.Endpoint = { ...func("id", "region"), platform: "gcfv2" };
 
-    planner.createDeploymentPlan(backend.of(v2Function), backend.of(v2Function));
-    expect(logLabeledBullet).to.not.have.been.called;
+      planner.createDeploymentPlan({
+        wantBackend: backend.of(v2Function),
+        haveBackend: backend.of(v2Function),
+        codebase,
+      });
+      expect(logLabeledBullet).to.not.have.been.called;
 
-    const v1Function: backend.Endpoint = { ...func("id", "region"), platform: "gcfv1" };
-    planner.createDeploymentPlan(backend.of(v1Function), backend.of(v1Function));
-    expect(logLabeledBullet).to.not.have.been.called;
+      const v1Function: backend.Endpoint = { ...func("id", "region"), platform: "gcfv1" };
+      planner.createDeploymentPlan({
+        wantBackend: backend.of(v1Function),
+        haveBackend: backend.of(v1Function),
+        codebase,
+      });
+      expect(logLabeledBullet).to.not.have.been.called;
 
-    // Upgraded but specified concurrency
-    const concurrencyUpgraded: backend.Endpoint = {
-      ...v1Function,
-      platform: "gcfv2",
-      concurrency: 80,
-    };
-    planner.createDeploymentPlan(backend.of(concurrencyUpgraded), backend.of(v1Function));
-    expect(logLabeledBullet).to.not.have.been.called;
+      // Upgraded but specified concurrency
+      const concurrencyUpgraded: backend.Endpoint = {
+        ...v1Function,
+        platform: "gcfv2",
+        concurrency: 80,
+      };
+      planner.createDeploymentPlan({
+        wantBackend: backend.of(concurrencyUpgraded),
+        haveBackend: backend.of(v1Function),
+        codebase,
+      });
+      expect(logLabeledBullet).to.not.have.been.called;
+    });
   });
 
   describe("checkForIllegalUpdate", () => {
@@ -251,7 +453,7 @@ describe("planner", () => {
       const have: backend.Endpoint = { ...func("id", "region"), platform: "gcfv1" };
       const want: backend.Endpoint = { ...func("id", "region"), platform: "gcfv2" };
 
-      expect(() => planner.checkForIllegalUpdate(want, have)).to.throw;
+      expect(() => planner.checkForIllegalUpdate(want, have)).to.throw();
     });
 
     it("should throw if a https function would be changed into an event triggered function", () => {
@@ -322,10 +524,8 @@ describe("planner", () => {
 
   it("detects changes to v2 pubsub topics", () => {
     const eventTrigger: backend.EventTrigger = {
-      eventType: gcfv2.PUBSUB_PUBLISH_EVENT,
-      eventFilters: {
-        resource: "projects/p/topics/t",
-      },
+      eventType: v2events.PUBSUB_PUBLISH_EVENT,
+      eventFilters: { topic: "projects/p/topics/t" },
       retry: false,
     };
 
@@ -355,7 +555,7 @@ describe("planner", () => {
     // to modify only 'want'
     want = JSON.parse(JSON.stringify(want)) as backend.Endpoint;
     if (backend.isEventTriggered(want)) {
-      want.eventTrigger.eventFilters.resource = "projects/p/topics/t2";
+      want.eventTrigger.eventFilters = { topic: "projects/p/topics/t2" };
     }
     expect(planner.changedV2PubSubTopic(want, have)).to.be.true;
   });

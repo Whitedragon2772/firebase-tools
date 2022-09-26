@@ -2,7 +2,7 @@ import { expect } from "chai";
 import * as sinon from "sinon";
 
 import * as optionsHelper from "../../../extensions/emulator/optionsHelper";
-import { ExtensionSpec } from "../../../extensions/extensionsApi";
+import { ExtensionSpec, Param, ParamType } from "../../../extensions/types";
 import * as paramHelper from "../../../extensions/paramHelper";
 
 describe("optionsHelper", () => {
@@ -98,11 +98,13 @@ describe("optionsHelper", () => {
           label: "param1",
           param: "USER_PARAM1",
           default: "hi",
+          required: true,
         },
         {
           label: "param2",
           param: "USER_PARAM2",
           default: "hello",
+          required: true,
         },
       ];
       readEnvFileStub.returns({});
@@ -114,6 +116,62 @@ describe("optionsHelper", () => {
         },
         ...autoParams,
       });
+    });
+  });
+
+  const TEST_SELECT_PARAM: Param = {
+    param: "SELECT_PARAM",
+    label: "A select param",
+    type: ParamType.SELECT,
+  };
+  const TEST_STRING_PARAM: Param = {
+    param: "STRING_PARAM",
+    label: "A string param",
+    type: ParamType.STRING,
+  };
+  const TEST_MULTISELECT_PARAM: Param = {
+    param: "MULTISELECT_PARAM",
+    label: "A multiselect param",
+    type: ParamType.MULTISELECT,
+  };
+  const TEST_SECRET_PARAM: Param = {
+    param: "SECRET_PARAM",
+    label: "A secret param",
+    type: ParamType.SECRET,
+  };
+  const TEST_PARAMS: Param[] = [
+    TEST_SELECT_PARAM,
+    TEST_STRING_PARAM,
+    TEST_MULTISELECT_PARAM,
+    TEST_SECRET_PARAM,
+  ];
+  const TEST_PARAM_VALUES = {
+    SELECT_PARAM: "select",
+    STRING_PARAM: "string",
+    MULTISELECT_PARAM: "multiselect",
+    SECRET_PARAM: "projects/test/secrets/mysecret/versionms/latest",
+  };
+
+  describe("getNonSecretEnv", () => {
+    it("should return only params that are not secret", () => {
+      expect(optionsHelper.getNonSecretEnv(TEST_PARAMS, TEST_PARAM_VALUES)).to.deep.equal({
+        SELECT_PARAM: "select",
+        STRING_PARAM: "string",
+        MULTISELECT_PARAM: "multiselect",
+      });
+    });
+  });
+
+  describe("getSecretEnv", () => {
+    it("should return only params that are secret", () => {
+      expect(optionsHelper.getSecretEnvVars(TEST_PARAMS, TEST_PARAM_VALUES)).to.have.deep.members([
+        {
+          projectId: "test",
+          key: "SECRET_PARAM",
+          secret: "mysecret",
+          version: "latest",
+        },
+      ]);
     });
   });
 });

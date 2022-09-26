@@ -1,5 +1,5 @@
 import * as _ from "lodash";
-import * as clc from "cli-color";
+import * as clc from "colorette";
 import * as fs from "fs";
 
 import { fetchWebSetup, getCachedWebSetup } from "../fetchWebSetup";
@@ -31,7 +31,7 @@ export async function implicitInit(options: any): Promise<TemplateServerResponse
   let config;
   try {
     config = await fetchWebSetup(options);
-  } catch (e) {
+  } catch (e: any) {
     logger.debug("fetchWebSetup error: " + e);
     const statusCode = _.get(e, "context.response.statusCode");
     if (statusCode === 403) {

@@ -1,5 +1,4 @@
 import * as inquirer from "inquirer";
-import * as _ from "lodash";
 
 import { FirebaseError } from "./error";
 
@@ -7,7 +6,7 @@ import { FirebaseError } from "./error";
  * Question type for inquirer. See
  * https://www.npmjs.com/package/inquirer#question
  */
-export type Question = inquirer.Question;
+export type Question = inquirer.DistinctQuestion;
 
 type QuestionsThatReturnAString<T> =
   | inquirer.RawListQuestion<T>
@@ -22,7 +21,7 @@ type Options = Record<string, any> & { nonInteractive?: boolean };
  * prompt is used to prompt the user for values. Specifically, any `name` of a
  * provided question will be checked against the `options` object. If `name`
  * exists as a key in `options`, it will *not* be prompted for. If `options`
- * contatins `nonInteractive = true`, then any `question.name` that does not
+ * contains `nonInteractive = true`, then any `question.name` that does not
  * have a value in `options` will cause an error to be returned. Once the values
  * are queried, the values for them are put onto the `options` object, and the
  * answers are returned.
@@ -30,8 +29,15 @@ type Options = Record<string, any> & { nonInteractive?: boolean };
  * @param questions `Question`s to ask the user.
  * @return The answers, keyed by the `name` of the `Question`.
  */
-export async function prompt(options: Options, questions: Question[]): Promise<any> {
+export async function prompt(
+  options: Options,
+  // NB: If Observables are to be added here, the for loop below will need to
+  // be adjusted as well.
+  questions: ReadonlyArray<inquirer.DistinctQuestion>
+): Promise<any> {
   const prompts = [];
+  // For each of our questions, if Options already has an answer,
+  // we go ahead and _skip_ that question.
   for (const question of questions) {
     if (question.name && options[question.name] === undefined) {
       prompts.push(question);
@@ -39,12 +45,11 @@ export async function prompt(options: Options, questions: Question[]): Promise<a
   }
 
   if (prompts.length && options.nonInteractive) {
-    const missingOptions = _.uniq(_.map(prompts, "name")).join(", ");
+    const missingOptions = Array.from(new Set(prompts.map((p) => p.name))).join(", ");
     throw new FirebaseError(
       `Missing required options (${missingOptions}) while running in non-interactive mode`,
       {
         children: prompts,
-        exit: 1,
       }
     );
   }
@@ -73,7 +78,7 @@ export async function promptOnce<A extends inquirer.Answers>(
   options?: Options
 ): Promise<number>;
 
-// This one is a bit hard to type out. Choices can be many things, including a genrator function. Even if we decided to limit
+// This one is a bit hard to type out. Choices can be many things, including a generator function. Even if we decided to limit
 // the ListQuestion to have a choices of ReadonlyArray<ChoiceOption<A>>, a ChoiceOption<A> still has a `.value` of `any`
 export async function promptOnce<A extends inquirer.Answers>(
   question: inquirer.ListQuestion<A>,
@@ -85,7 +90,7 @@ export async function promptOnce<A extends inquirer.Answers>(
  * @param question The question (of life, the universe, and everything).
  * @return The value as returned by `inquirer` for that quesiton.
  */
-export async function promptOnce<A>(question: Question, options: Options = {}): Promise<any> {
+export async function promptOnce<A>(question: Question, options: Options = {}): Promise<A> {
   question.name = question.name || "question";
   await prompt(options, [question]);
   return options[question.name];

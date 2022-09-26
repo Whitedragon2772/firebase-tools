@@ -1,5 +1,4 @@
 import { Command } from "../command";
-import * as utils from "../utils";
 import { needProjectId } from "../projectUtils";
 import {
   listGcfPaths,
@@ -20,7 +19,7 @@ function getConfirmationMessage(paths: string[]): string {
   return message;
 }
 
-export default new Command("functions:deletegcfartifacts")
+export const command = new Command("functions:deletegcfartifacts")
   .description(
     "Deletes all artifacts created by Google Cloud Functions on Google Container Registry."
   )
@@ -50,7 +49,7 @@ export default new Command("functions:deletegcfartifacts")
         throw new FirebaseError("Command aborted.", { exit: 1 });
       }
       await deleteGcfArtifacts(projectId, regions, dockerHelper);
-    } catch (err) {
+    } catch (err: any) {
       throw new FirebaseError("Command failed.", { original: err });
     }
   });

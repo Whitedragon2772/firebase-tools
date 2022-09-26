@@ -186,7 +186,7 @@ const throttlerTest = (ThrottlerConstructor: ThrottlerConstructorType): void => 
     return q
       .wait()
       .catch((err: Error) => {
-        throw new Error("handler should have passed ");
+        throw new Error(`handler should have passed ${err.message}`);
       })
       .then(() => {
         expect(q.complete).to.equal(3);
@@ -223,7 +223,7 @@ const throttlerTest = (ThrottlerConstructor: ThrottlerConstructorType): void => 
     return q
       .wait()
       .catch((err: Error) => {
-        throw new Error("handler should have passed");
+        throw new Error(`handler should have passed ${err.message}`);
       })
       .then(() => {
         expect(handler.callCount).to.equal(9);
@@ -280,7 +280,7 @@ const throttlerTest = (ThrottlerConstructor: ThrottlerConstructorType): void => 
     let err;
     try {
       await q.run(2, 100);
-    } catch (e) {
+    } catch (e: any) {
       err = e;
     }
     expect(err).to.be.instanceOf(TimeoutError);
@@ -299,7 +299,7 @@ const throttlerTest = (ThrottlerConstructor: ThrottlerConstructorType): void => 
     let err;
     try {
       await q.run(2, 200);
-    } catch (e) {
+    } catch (e: any) {
       err = e;
     }
     expect(err).to.be.instanceOf(RetriesExhaustedError);
@@ -327,7 +327,7 @@ const throttlerTest = (ThrottlerConstructor: ThrottlerConstructorType): void => 
     let err;
     try {
       await q.run(2, 100);
-    } catch (e) {
+    } catch (e: any) {
       err = e;
     }
     expect(err).to.be.instanceOf(TimeoutError);
@@ -357,7 +357,7 @@ const throttlerTest = (ThrottlerConstructor: ThrottlerConstructorType): void => 
     let err;
     try {
       await q.wait();
-    } catch (e) {
+    } catch (e: any) {
       err = e;
     }
     expect(err).to.be.instanceOf(TimeoutError);
@@ -385,7 +385,7 @@ const throttlerTest = (ThrottlerConstructor: ThrottlerConstructorType): void => 
     let err;
     try {
       await q.wait();
-    } catch (e) {
+    } catch (e: any) {
       err = e;
     }
     expect(err).to.be.instanceOf(RetriesExhaustedError);
@@ -485,7 +485,7 @@ export const createTask = (name: string, resolved: boolean) => {
       resolve = s;
       reject = j;
     });
-    const startExecutePromise = new Promise((s, j) => {
+    const startExecutePromise = new Promise((s) => {
       startExecute = s;
     });
     res({

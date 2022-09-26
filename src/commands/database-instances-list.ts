@@ -1,6 +1,6 @@
 import { Command } from "../command";
 import Table = require("cli-table");
-import * as clc from "cli-color";
+import * as clc from "colorette";
 import * as ora from "ora";
 
 import { logger } from "../logger";
@@ -40,7 +40,7 @@ function logInstancesCount(count = 0): void {
   logger.info(`${count} database instance(s) total.`);
 }
 
-let cmd = new Command("database:instances:list")
+export let command = new Command("database:instances:list")
   .description("list realtime database instances, optionally filtered by a specified location")
   .before(requirePermissions, ["firebasedatabase.instances.list"])
   .before(warnEmulatorNotSupported, Emulators.DATABASE)
@@ -56,7 +56,7 @@ let cmd = new Command("database:instances:list")
       const projectId = needProjectId(options);
       try {
         instances = await listDatabaseInstances(projectId, location);
-      } catch (err) {
+      } catch (err: any) {
         spinner.fail();
         throw err;
       }
@@ -68,7 +68,7 @@ let cmd = new Command("database:instances:list")
     const projectNumber = await needProjectNumber(options);
     try {
       instances = await firedata.listDatabaseInstances(projectNumber);
-    } catch (err) {
+    } catch (err: any) {
       spinner.fail();
       throw err;
     }
@@ -81,9 +81,8 @@ let cmd = new Command("database:instances:list")
   });
 
 if (previews.rtdbmanagement) {
-  cmd = cmd.option(
+  command = command.option(
     "-l, --location <location>",
     "(optional) location for the database instance, defaults to us-central1"
   );
 }
-export default cmd;

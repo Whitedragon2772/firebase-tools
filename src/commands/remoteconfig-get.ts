@@ -12,20 +12,21 @@ import * as utils from "../utils";
 import Table = require("cli-table");
 import * as fs from "fs";
 import util = require("util");
+import { FirebaseError } from "../error";
 
 const tableHead = ["Entry Name", "Value"];
 
 // Creates a maximum limit of 50 names for each entry
 const MAX_DISPLAY_ITEMS = 20;
 
-function checkValidNumber(versionNumber: string): string {
-  if (typeof Number(versionNumber) == "number") {
+function checkValidOptionalNumber(versionNumber?: string): string | undefined {
+  if (!versionNumber || typeof Number(versionNumber) === "number") {
     return versionNumber;
   }
-  return "null";
+  throw new FirebaseError(`Could not interpret "${versionNumber}" as a valid number.`);
 }
 
-module.exports = new Command("remoteconfig:get")
+export const command = new Command("remoteconfig:get")
   .description("get a Firebase project's Remote Config template")
   .option("-v, --version-number <versionNumber>", "grabs the specified version of the template")
   .option(
@@ -35,10 +36,10 @@ module.exports = new Command("remoteconfig:get")
   .before(requireAuth)
   .before(requirePermissions, ["cloudconfig.configs.get"])
   .action(async (options: Options) => {
-    utils.assertIsString(options.versionNumber);
+    utils.assertIsStringOrUndefined(options.versionNumber);
     const template: RemoteConfigTemplate = await rcGet.getTemplate(
       needProjectId(options),
-      checkValidNumber(options.versionNumber)
+      checkValidOptionalNumber(options.versionNumber)
     );
     const table = new Table({ head: tableHead, style: { head: ["green"] } });
     if (template.conditions) {

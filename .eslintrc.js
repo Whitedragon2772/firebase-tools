@@ -10,7 +10,6 @@ module.exports = {
     "plugin:jsdoc/recommended",
     "google",
     "prettier",
-    "prettier/@typescript-eslint",
   ],
   rules: {
     "jsdoc/newline-after-description": "off",
@@ -37,8 +36,12 @@ module.exports = {
         "jsdoc/require-param": "off",
         "jsdoc/require-returns": "off",
 
+        "@typescript-eslint/no-invalid-this": "error",
+        "@typescript-eslint/no-unused-vars": "error", // Unused vars should not exist.
         "no-invalid-this": "off", // Turned off in favor of @typescript-eslint/no-invalid-this.
-        "@typescript-eslint/no-invalid-this": ["error"],
+        "no-unused-vars": "off", // Off in favor of @typescript-eslint/no-unused-vars.
+        eqeqeq: ["error", "always", { null: "ignore" }],
+        camelcase: ["error", { properties: "never" }], // snake_case allowed in properties iif to satisfy an external contract / style
 
         "@typescript-eslint/ban-types": "warn", // TODO(bkendall): remove, allow to error.
         "@typescript-eslint/explicit-function-return-type": ["warn", { allowExpressions: true }], // TODO(bkendall): SET to error.
@@ -47,6 +50,7 @@ module.exports = {
         "@typescript-eslint/no-inferrable-types": "warn", // TODO(bkendall): remove, allow to error.
         "@typescript-eslint/no-misused-promises": "warn", // TODO(bkendall): remove, allow to error.
         "@typescript-eslint/no-unnecessary-type-assertion": "warn", // TODO(bkendall): remove, allow to error.
+        "@typescript-eslint/no-unsafe-argument": "warn", // TODO(bkendall): remove, allow to error.
         "@typescript-eslint/no-unsafe-assignment": "warn", // TODO(bkendall): remove, allow to error.
         "@typescript-eslint/no-unsafe-call": "warn", // TODO(bkendall): remove, allow to error.
         "@typescript-eslint/no-unsafe-member-access": "warn", // TODO(bkendall): remove, allow to error.
@@ -61,8 +65,6 @@ module.exports = {
         "no-case-declarations": "warn", // TODO(bkendall): remove, allow to error.
         "no-constant-condition": "warn", // TODO(bkendall): remove, allow to error.
         "no-fallthrough": "warn", // TODO(bkendall): remove, allow to error.
-        "no-unused-vars": "warn", // TODO(bkendall): remove, allow to error.
-        camelcase: ["warn", { ignoreDestructuring: true }], // TODO(bkendall): remove, allow to error.
       },
     },
     {
@@ -73,6 +75,7 @@ module.exports = {
         "@typescript-eslint/no-floating-promises": "off",
         "@typescript-eslint/no-misused-promises": "off",
         "@typescript-eslint/no-this-alias": "off",
+        "@typescript-eslint/no-unsafe-argument": "off",
         "@typescript-eslint/no-unsafe-assignment": "off",
         "@typescript-eslint/no-unsafe-call": "off",
         "@typescript-eslint/no-unsafe-member-access": "off",

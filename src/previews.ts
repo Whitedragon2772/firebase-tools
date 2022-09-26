@@ -6,12 +6,12 @@ interface PreviewFlags {
   ext: boolean;
   extdev: boolean;
   rtdbmanagement: boolean;
-  functionsv2: boolean;
   golang: boolean;
   deletegcfartifacts: boolean;
-  dotenv: boolean;
-  crashlyticsSymbolsUpload: boolean;
-  artifactregistry: boolean;
+  emulatoruisnapshot: boolean;
+  frameworkawareness: boolean;
+  functionsparams: boolean;
+  skipdeployingnoopfunctions: boolean;
 }
 
 export const previews: PreviewFlags = {
@@ -20,14 +20,14 @@ export const previews: PreviewFlags = {
   ext: false,
   extdev: false,
   rtdbmanagement: false,
-  functionsv2: false,
   golang: false,
   deletegcfartifacts: false,
-  dotenv: false,
-  crashlyticsSymbolsUpload: false,
-  artifactregistry: false,
+  emulatoruisnapshot: false,
+  frameworkawareness: false,
+  functionsparams: false,
+  skipdeployingnoopfunctions: false,
 
-  ...configstore.get("previews"),
+  ...(configstore.get("previews") as Partial<PreviewFlags>),
 };
 
 if (process.env.FIREBASE_CLI_PREVIEWS) {

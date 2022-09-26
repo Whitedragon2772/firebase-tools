@@ -5,12 +5,12 @@ import * as sinon from "sinon";
 import { FirebaseError } from "../../error";
 import { firebaseExtensionsRegistryOrigin } from "../../api";
 import * as extensionsApi from "../../extensions/extensionsApi";
+import { ExtensionSpec, Resource } from "../../extensions/types";
 import * as extensionsHelper from "../../extensions/extensionsHelper";
-import * as prompt from "../../prompt";
-import * as resolveSource from "../../extensions/resolveSource";
 import * as updateHelper from "../../extensions/updateHelper";
+import * as iam from "../../gcp/iam";
 
-const SPEC = {
+const SPEC: ExtensionSpec = {
   name: "test",
   displayName: "Old",
   description: "descriptive",
@@ -26,7 +26,7 @@ const SPEC = {
   ],
   resources: [
     { name: "resource1", type: "firebaseextensions.v1beta.function", description: "desc" },
-    { name: "resource2", type: "other", description: "" },
+    { name: "resource2", type: "other", description: "" } as unknown as Resource,
   ],
   author: { authorName: "Tester" },
   contributors: [{ authorName: "Tester 2" }],
@@ -35,71 +35,11 @@ const SPEC = {
   params: [],
 };
 
-const OLD_SPEC = Object.assign({}, SPEC, { version: "0.1.0" });
-
 const SOURCE = {
   name: "projects/firebasemods/sources/new-test-source",
   packageUri: "https://firebase-fake-bucket.com",
   hash: "1234567",
   spec: SPEC,
-};
-
-const EXTENSION_VERSION = {
-  name: "publishers/test-publisher/extensions/test/versions/0.2.0",
-  ref: "test-publisher/test@0.2.0",
-  spec: SPEC,
-  state: "PUBLISHED",
-  hash: "abcdefg",
-  createTime: "2020-06-30T00:21:06.722782Z",
-};
-
-const EXTENSION = {
-  name: "publishers/test-publisher/extensions/test",
-  ref: "test-publisher/test",
-  state: "PUBLISHED",
-  createTime: "2020-06-30T00:21:06.722782Z",
-  latestVersion: "0.2.0",
-};
-
-const REGISTRY_ENTRY = {
-  name: "test",
-  labels: {
-    latest: "0.2.0",
-    minRequired: "0.1.1",
-  },
-  versions: {
-    "0.1.0": "projects/firebasemods/sources/2kd",
-    "0.1.1": "projects/firebasemods/sources/xyz",
-    "0.1.2": "projects/firebasemods/sources/123",
-    "0.2.0": "projects/firebasemods/sources/abc",
-  },
-  updateWarnings: {
-    ">0.1.0 <0.2.0": [
-      {
-        from: "0.1.0",
-        description:
-          "Starting Jan 15, HTTP functions will be private by default. [Learn more](https://someurl.com)",
-        action:
-          "After updating, it is highly recommended that you switch your Cloud Scheduler jobs to <b>PubSub</b>",
-      },
-    ],
-    ">=0.2.0": [
-      {
-        from: "0.1.0",
-        description:
-          "Starting Jan 15, HTTP functions will be private by default. [Learn more](https://someurl.com)",
-        action:
-          "After updating, you must switch your Cloud Scheduler jobs to <b>PubSub</b>, otherwise your extension will stop running.",
-      },
-      {
-        from: ">0.1.0",
-        description:
-          "Starting Jan 15, HTTP functions will be private by default. [Learn more](https://someurl.com)",
-        action:
-          "If you have not already done so during a previous update, after updating, you must switch your Cloud Scheduler jobs to <b>PubSub</b>, otherwise your extension will stop running.",
-      },
-    ],
-  },
 };
 
 const INSTANCE = {
@@ -108,8 +48,7 @@ const INSTANCE = {
   updateTime: "2019-05-19T00:20:10.416947Z",
   state: "ACTIVE",
   config: {
-    name:
-      "projects/invader-zim/instances/instance-of-official-ext/configurations/95355951-397f-4821-a5c2-9c9788b2cc63",
+    name: "projects/invader-zim/instances/instance-of-official-ext/configurations/95355951-397f-4821-a5c2-9c9788b2cc63",
     createTime: "2019-05-19T00:20:10.416947Z",
     sourceId: "fake-official-source",
     sourceName: "projects/firebasemods/sources/fake-official-source",
@@ -125,8 +64,7 @@ const REGISTRY_INSTANCE = {
   updateTime: "2019-05-19T00:20:10.416947Z",
   state: "ACTIVE",
   config: {
-    name:
-      "projects/invader-zim/instances/instance-of-registry-ext/configurations/95355951-397f-4821-a5c2-9c9788b2cc63",
+    name: "projects/invader-zim/instances/instance-of-registry-ext/configurations/95355951-397f-4821-a5c2-9c9788b2cc63",
     createTime: "2019-05-19T00:20:10.416947Z",
     sourceId: "fake-registry-source",
     sourceName: "projects/firebasemods/sources/fake-registry-source",
@@ -143,8 +81,7 @@ const LOCAL_INSTANCE = {
   updateTime: "2019-05-19T00:20:10.416947Z",
   state: "ACTIVE",
   config: {
-    name:
-      "projects/invader-zim/instances/instance-of-local-ext/configurations/95355951-397f-4821-a5c2-9c9788b2cc63",
+    name: "projects/invader-zim/instances/instance-of-local-ext/configurations/95355951-397f-4821-a5c2-9c9788b2cc63",
     createTime: "2019-05-19T00:20:10.416947Z",
     sourceId: "fake-registry-source",
     sourceName: "projects/firebasemods/sources/fake-local-source",
@@ -158,11 +95,15 @@ describe("updateHelper", () => {
   describe("updateFromLocalSource", () => {
     let createSourceStub: sinon.SinonStub;
     let getInstanceStub: sinon.SinonStub;
-
+    let getRoleStub: sinon.SinonStub;
     beforeEach(() => {
       createSourceStub = sinon.stub(extensionsHelper, "createSourceFromLocation");
       getInstanceStub = sinon.stub(extensionsApi, "getInstance").resolves(INSTANCE);
-
+      getRoleStub = sinon.stub(iam, "getRole");
+      getRoleStub.resolves({
+        title: "Role 1",
+        description: "a role",
+      });
       // The logic will fetch the extensions registry, but it doesn't need to receive anything.
       nock(firebaseExtensionsRegistryOrigin).get("/extensions.json").reply(200, {});
     });
@@ -170,6 +111,7 @@ describe("updateHelper", () => {
     afterEach(() => {
       createSourceStub.restore();
       getInstanceStub.restore();
+      getRoleStub.restore();
 
       nock.cleanAll();
     });
@@ -196,11 +138,15 @@ describe("updateHelper", () => {
   describe("updateFromUrlSource", () => {
     let createSourceStub: sinon.SinonStub;
     let getInstanceStub: sinon.SinonStub;
-
+    let getRoleStub: sinon.SinonStub;
     beforeEach(() => {
       createSourceStub = sinon.stub(extensionsHelper, "createSourceFromLocation");
       getInstanceStub = sinon.stub(extensionsApi, "getInstance").resolves(INSTANCE);
-
+      getRoleStub = sinon.stub(iam, "getRole");
+      getRoleStub.resolves({
+        title: "Role 1",
+        description: "a role",
+      });
       // The logic will fetch the extensions registry, but it doesn't need to receive anything.
       nock(firebaseExtensionsRegistryOrigin).get("/extensions.json").reply(200, {});
     });
@@ -208,6 +154,7 @@ describe("updateHelper", () => {
     afterEach(() => {
       createSourceStub.restore();
       getInstanceStub.restore();
+      getRoleStub.restore();
 
       nock.cleanAll();
     });
@@ -233,118 +180,6 @@ describe("updateHelper", () => {
           SPEC
         )
       ).to.be.rejectedWith(FirebaseError, "Unable to update from the source");
-    });
-  });
-
-  describe("updateToVersionFromPublisherSource", () => {
-    let getExtensionStub: sinon.SinonStub;
-    let createSourceStub: sinon.SinonStub;
-    let listExtensionVersionStub: sinon.SinonStub;
-    let registryStub: sinon.SinonStub;
-    let isOfficialStub: sinon.SinonStub;
-    let getInstanceStub: sinon.SinonStub;
-
-    beforeEach(() => {
-      getExtensionStub = sinon.stub(extensionsApi, "getExtension");
-      createSourceStub = sinon.stub(extensionsApi, "getExtensionVersion");
-      listExtensionVersionStub = sinon.stub(extensionsApi, "listExtensionVersions");
-      registryStub = sinon.stub(resolveSource, "resolveRegistryEntry");
-      registryStub.resolves(REGISTRY_ENTRY);
-      isOfficialStub = sinon.stub(resolveSource, "isOfficialSource");
-      isOfficialStub.returns(false);
-      getInstanceStub = sinon.stub(extensionsApi, "getInstance").resolves(REGISTRY_INSTANCE);
-    });
-
-    afterEach(() => {
-      getExtensionStub.restore();
-      createSourceStub.restore();
-      listExtensionVersionStub.restore();
-      registryStub.restore();
-      isOfficialStub.restore();
-      getInstanceStub.restore();
-    });
-
-    it("should return the correct source name for a valid published extension version source", async () => {
-      getExtensionStub.resolves(EXTENSION);
-      createSourceStub.resolves(EXTENSION_VERSION);
-      listExtensionVersionStub.resolves([]);
-      const name = await updateHelper.updateToVersionFromPublisherSource(
-        "test-project",
-        "test-instance",
-        "test-publisher/test@0.2.0",
-        SPEC
-      );
-      expect(name).to.equal(EXTENSION_VERSION.name);
-    });
-
-    it("should throw an error for an invalid source", async () => {
-      getExtensionStub.throws(Error("NOT FOUND"));
-      createSourceStub.throws(Error("NOT FOUND"));
-      listExtensionVersionStub.resolves([]);
-      await expect(
-        updateHelper.updateToVersionFromPublisherSource(
-          "test-project",
-          "test-instance",
-          "test-publisher/test@1.2.3",
-          SPEC
-        )
-      ).to.be.rejectedWith("NOT FOUND");
-    });
-  });
-
-  describe("updateFromPublisherSource", () => {
-    let getExtensionStub: sinon.SinonStub;
-    let createSourceStub: sinon.SinonStub;
-    let listExtensionVersionStub: sinon.SinonStub;
-    let registryStub: sinon.SinonStub;
-    let isOfficialStub: sinon.SinonStub;
-    let getInstanceStub: sinon.SinonStub;
-
-    beforeEach(() => {
-      getExtensionStub = sinon.stub(extensionsApi, "getExtension");
-      createSourceStub = sinon.stub(extensionsApi, "getExtensionVersion");
-      listExtensionVersionStub = sinon.stub(extensionsApi, "listExtensionVersions");
-      registryStub = sinon.stub(resolveSource, "resolveRegistryEntry");
-      registryStub.resolves(REGISTRY_ENTRY);
-      isOfficialStub = sinon.stub(resolveSource, "isOfficialSource");
-      isOfficialStub.returns(false);
-      getInstanceStub = sinon.stub(extensionsApi, "getInstance").resolves(REGISTRY_INSTANCE);
-    });
-
-    afterEach(() => {
-      getExtensionStub.restore();
-      createSourceStub.restore();
-      listExtensionVersionStub.restore();
-      registryStub.restore();
-      isOfficialStub.restore();
-      getInstanceStub.restore();
-    });
-
-    it("should return the correct source name for the latest published extension source", async () => {
-      getExtensionStub.resolves(EXTENSION);
-      createSourceStub.resolves(EXTENSION_VERSION);
-      listExtensionVersionStub.resolves([]);
-      const name = await updateHelper.updateToVersionFromPublisherSource(
-        "test-project",
-        "test-instance",
-        "test-publisher/test",
-        SPEC
-      );
-      expect(name).to.equal(EXTENSION_VERSION.name);
-    });
-
-    it("should throw an error for an invalid source", async () => {
-      getExtensionStub.throws(Error("NOT FOUND"));
-      createSourceStub.throws(Error("NOT FOUND"));
-      listExtensionVersionStub.resolves([]);
-      await expect(
-        updateHelper.updateToVersionFromPublisherSource(
-          "test-project",
-          "test-instance",
-          "test-publisher/test",
-          SPEC
-        )
-      ).to.be.rejectedWith("NOT FOUND");
     });
   });
 });
@@ -389,9 +224,7 @@ describe("getExistingSourceOrigin", () => {
 
     const result = await updateHelper.getExistingSourceOrigin(
       "invader-zim",
-      "instance-of-registry-ext",
-      "ext-testing",
-      "projects/firebasemods/sources/fake-registry-source"
+      "instance-of-registry-ext"
     );
 
     expect(result).to.equal(extensionsHelper.SourceOrigin.PUBLISHED_EXTENSION);
@@ -402,9 +235,7 @@ describe("getExistingSourceOrigin", () => {
 
     const result = await updateHelper.getExistingSourceOrigin(
       "invader-zim",
-      "instance-of-local-ext",
-      "ext-testing",
-      "projects/firebasemods/sources/fake-local-source"
+      "instance-of-local-ext"
     );
 
     expect(result).to.equal(extensionsHelper.SourceOrigin.LOCAL);

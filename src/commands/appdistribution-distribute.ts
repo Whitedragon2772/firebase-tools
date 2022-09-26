@@ -28,7 +28,7 @@ function getReleaseNotes(releaseNotes: string, releaseNotesFile: string): string
   return "";
 }
 
-module.exports = new Command("appdistribution:distribute <release-binary-file>")
+export const command = new Command("appdistribution:distribute <release-binary-file>")
   .description("upload a release binary")
   .option("--app <app_id>", "the app id of your Firebase app")
   .option("--release-notes <string>", "release notes to include")
@@ -56,7 +56,7 @@ module.exports = new Command("appdistribution:distribute <release-binary-file>")
     if (distribution.distributionFileType() === DistributionFileType.AAB) {
       try {
         aabInfo = await requests.getAabInfo(appName);
-      } catch (err) {
+      } catch (err: any) {
         if (err.status === 404) {
           throw new FirebaseError(
             `App Distribution could not find your app ${options.app}. ` +
@@ -130,7 +130,7 @@ module.exports = new Command("appdistribution:distribute <release-binary-file>")
           );
       }
       releaseName = uploadResponse.release.name;
-    } catch (err) {
+    } catch (err: any) {
       if (err.status === 404) {
         throw new FirebaseError(
           `App Distribution could not find your app ${options.app}. ` +

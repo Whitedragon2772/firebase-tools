@@ -4,11 +4,65 @@ import * as sinon from "sinon";
 import { FirebaseError } from "../../error";
 import * as extensionsApi from "../../extensions/extensionsApi";
 import * as extensionsHelper from "../../extensions/extensionsHelper";
-import * as resolveSource from "../../extensions/resolveSource";
+import * as getProjectNumber from "../../getProjectNumber";
+import * as functionsConfig from "../../functionsConfig";
 import { storage } from "../../gcp";
 import * as archiveDirectory from "../../archiveDirectory";
 import * as prompt from "../../prompt";
-import { ExtensionSource } from "../../extensions/extensionsApi";
+import {
+  ExtensionSource,
+  ExtensionSpec,
+  ExtensionVersion,
+  Param,
+  ParamType,
+} from "../../extensions/types";
+import { Readable } from "stream";
+import { ArchiveResult } from "../../archiveDirectory";
+import { canonicalizeRefInput } from "../../extensions/extensionsHelper";
+import * as planner from "../../deploy/extensions/planner";
+
+const EXT_SPEC_1: ExtensionSpec = {
+  name: "cool-things",
+  version: "0.0.1-rc.0",
+  resources: [
+    {
+      name: "cool-resource",
+      type: "firebaseextensions.v1beta.function",
+    },
+  ],
+  sourceUrl: "www.google.com/cool-things-here",
+  params: [],
+};
+const EXT_SPEC_2: ExtensionSpec = {
+  name: "cool-things",
+  version: "0.0.1-rc.1",
+  resources: [
+    {
+      name: "cool-resource",
+      type: "firebaseextensions.v1beta.function",
+    },
+  ],
+  sourceUrl: "www.google.com/cool-things-here",
+  params: [],
+};
+const TEST_EXT_VERSION_1: ExtensionVersion = {
+  name: "publishers/test-pub/extensions/ext-one/versions/0.0.1-rc.0",
+  ref: "test-pub/ext-one@0.0.1-rc.0",
+  spec: EXT_SPEC_1,
+  state: "PUBLISHED",
+  hash: "12345",
+  createTime: "2020-06-30T00:21:06.722782Z",
+  sourceDownloadUri: "",
+};
+const TEST_EXT_VERSION_2: ExtensionVersion = {
+  name: "publishers/test-pub/extensions/ext-one/versions/0.0.1-rc.1",
+  ref: "test-pub/ext-one@0.0.1-rc.1",
+  spec: EXT_SPEC_2,
+  state: "PUBLISHED",
+  hash: "23456",
+  createTime: "2020-06-30T00:21:06.722782Z",
+  sourceDownloadUri: "",
+};
 
 describe("extensionsHelper", () => {
   describe("substituteParams", () => {
@@ -102,10 +156,9 @@ describe("extensionsHelper", () => {
       ENV_VAR_ONE: "12345",
       ENV_VAR_TWO: "hello@example.com",
       ENV_VAR_THREE: "https://${PROJECT_ID}.web.app/?acceptInvitation={token}",
-      ENV_VAR_FOUR: "users/{sender}.friends",
     };
 
-    const exampleParamSpec: extensionsApi.Param[] = [
+    const exampleParamSpec: Param[] = [
       {
         param: "ENV_VAR_ONE",
         label: "env1",
@@ -163,7 +216,7 @@ describe("extensionsHelper", () => {
   });
 
   describe("validateCommandLineParams", () => {
-    const exampleParamSpec: extensionsApi.Param[] = [
+    const exampleParamSpec: Param[] = [
       {
         param: "ENV_VAR_ONE",
         label: "env1",
@@ -303,7 +356,7 @@ describe("extensionsHelper", () => {
         {
           param: "HI",
           label: "hello",
-          type: extensionsApi.ParamType.MULTISELECT,
+          type: ParamType.MULTISELECT,
           options: [
             {
               value: "val",
@@ -326,7 +379,7 @@ describe("extensionsHelper", () => {
         {
           param: "HI",
           label: "hello",
-          type: extensionsApi.ParamType.MULTISELECT,
+          type: ParamType.MULTISELECT,
           options: [],
           validationRegex: "FAIL",
           required: true,
@@ -346,7 +399,7 @@ describe("extensionsHelper", () => {
         {
           param: "HI",
           label: "hello",
-          type: extensionsApi.ParamType.SELECT,
+          type: ParamType.SELECT,
           validationRegex: "FAIL",
           options: [],
           required: true,
@@ -366,7 +419,7 @@ describe("extensionsHelper", () => {
         {
           param: "HI",
           label: "hello",
-          type: extensionsApi.ParamType.SELECT,
+          type: ParamType.SELECT,
           options: [
             {
               value: "val",
@@ -389,7 +442,7 @@ describe("extensionsHelper", () => {
         {
           param: "HI",
           label: "hello",
-          type: extensionsApi.ParamType.MULTISELECT,
+          type: ParamType.MULTISELECT,
           options: [
             {
               value: "val",
@@ -411,9 +464,49 @@ describe("extensionsHelper", () => {
     });
   });
 
+  describe("incrementPrereleaseVersion", () => {
+    let listExtensionVersionsStub: sinon.SinonStub;
+
+    beforeEach(() => {
+      listExtensionVersionsStub = sinon.stub(extensionsApi, "listExtensionVersions");
+      listExtensionVersionsStub.returns(Promise.resolve([TEST_EXT_VERSION_1, TEST_EXT_VERSION_2]));
+    });
+
+    afterEach(() => {
+      listExtensionVersionsStub.restore();
+    });
+
+    it("should increment rc version", async () => {
+      const newVersion = await extensionsHelper.incrementPrereleaseVersion(
+        "test-pub/ext-one",
+        "0.0.1",
+        "rc"
+      );
+      expect(newVersion).to.eql("0.0.1-rc.2");
+    });
+
+    it("should be first beta version", async () => {
+      const newVersion = await extensionsHelper.incrementPrereleaseVersion(
+        "test-pub/ext-one",
+        "0.0.1",
+        "beta"
+      );
+      expect(newVersion).to.eql("0.0.1-beta.0");
+    });
+
+    it("should not increment version", async () => {
+      const newVersion = await extensionsHelper.incrementPrereleaseVersion(
+        "test-pub/ext-one",
+        "0.0.1",
+        "stable"
+      );
+      expect(newVersion).to.eql("0.0.1");
+    });
+  });
+
   describe("validateSpec", () => {
     it("should not error on a valid spec", () => {
-      const testSpec: extensionsApi.ExtensionSpec = {
+      const testSpec: ExtensionSpec = {
         name: "test",
         version: "0.1.0",
         specVersion: "v1beta",
@@ -428,7 +521,7 @@ describe("extensionsHelper", () => {
       }).not.to.throw();
     });
     it("should error if license is missing", () => {
-      const testSpec: extensionsApi.ExtensionSpec = {
+      const testSpec: ExtensionSpec = {
         name: "test",
         version: "0.1.0",
         specVersion: "v1beta",
@@ -442,7 +535,7 @@ describe("extensionsHelper", () => {
       }).to.throw(FirebaseError, /license/);
     });
     it("should error if license is invalid", () => {
-      const testSpec: extensionsApi.ExtensionSpec = {
+      const testSpec: ExtensionSpec = {
         name: "test",
         version: "0.1.0",
         specVersion: "v1beta",
@@ -716,14 +809,22 @@ describe("extensionsHelper", () => {
         params: [],
       },
     };
+    const testArchivedFiles: ArchiveResult = {
+      file: "somefile",
+      manifest: ["file"],
+      size: 4,
+      source: "/some/path",
+      stream: new Readable(),
+    };
+    const testUploadedArchive: { bucket: string; object: string; generation: string | null } = {
+      bucket: extensionsHelper.EXTENSIONS_BUCKET_NAME,
+      object: "object.zip",
+      generation: "1",
+    };
 
     beforeEach(() => {
-      archiveStub = sinon.stub(archiveDirectory, "archiveDirectory").resolves({});
-      uploadStub = sinon.stub(storage, "uploadObject").resolves({
-        bucket: "firebase-ext-eap-uploads",
-        object: "object.zip",
-        generation: 42,
-      });
+      archiveStub = sinon.stub(archiveDirectory, "archiveDirectory").resolves(testArchivedFiles);
+      uploadStub = sinon.stub(storage, "uploadObject").resolves(testUploadedArchive);
       createSourceStub = sinon.stub(extensionsApi, "createSource").resolves(testSource);
       deleteStub = sinon.stub(storage, "deleteObject").resolves();
     });
@@ -737,7 +838,10 @@ describe("extensionsHelper", () => {
 
       expect(result).to.equal(testSource);
       expect(archiveStub).to.have.been.calledWith(".");
-      expect(uploadStub).to.have.been.calledWith({}, extensionsHelper.EXTENSIONS_BUCKET_NAME);
+      expect(uploadStub).to.have.been.calledWith(
+        testArchivedFiles,
+        extensionsHelper.EXTENSIONS_BUCKET_NAME
+      );
       expect(createSourceStub).to.have.been.calledWith("test-proj", testUrl + "?alt=media", "/");
       expect(deleteStub).to.have.been.calledWith(
         `/${extensionsHelper.EXTENSIONS_BUCKET_NAME}/object.zip`
@@ -751,26 +855,17 @@ describe("extensionsHelper", () => {
 
       expect(result).to.equal(testSource);
       expect(archiveStub).to.have.been.calledWith(".");
-      expect(uploadStub).to.have.been.calledWith({}, extensionsHelper.EXTENSIONS_BUCKET_NAME);
+      expect(uploadStub).to.have.been.calledWith(
+        testArchivedFiles,
+        extensionsHelper.EXTENSIONS_BUCKET_NAME
+      );
       expect(createSourceStub).to.have.been.calledWith("test-proj", testUrl + "?alt=media", "/");
       expect(deleteStub).to.have.been.calledWith(
         `/${extensionsHelper.EXTENSIONS_BUCKET_NAME}/object.zip`
       );
     });
 
-    it("should create an ExtensionSource with url sources", async () => {
-      const url = "https://storage.com/my.zip";
-
-      const result = await extensionsHelper.createSourceFromLocation("test-proj", url);
-
-      expect(result).to.equal(testSource);
-      expect(createSourceStub).to.have.been.calledWith("test-proj", url);
-      expect(archiveStub).not.to.have.been.called;
-      expect(uploadStub).not.to.have.been.called;
-      expect(deleteStub).not.to.have.been.called;
-    });
-
-    it("should throw an error if one is thrown while uploading a local source ", async () => {
+    it("should throw an error if one is thrown while uploading a local source", async () => {
       uploadStub.throws(new FirebaseError("something bad happened"));
 
       await expect(extensionsHelper.createSourceFromLocation("test-proj", ".")).to.be.rejectedWith(
@@ -778,75 +873,12 @@ describe("extensionsHelper", () => {
       );
 
       expect(archiveStub).to.have.been.calledWith(".");
-      expect(uploadStub).to.have.been.calledWith({}, extensionsHelper.EXTENSIONS_BUCKET_NAME);
+      expect(uploadStub).to.have.been.calledWith(
+        testArchivedFiles,
+        extensionsHelper.EXTENSIONS_BUCKET_NAME
+      );
       expect(createSourceStub).not.to.have.been.called;
       expect(deleteStub).not.to.have.been.called;
-    });
-  });
-
-  describe("getExtensionSourceFromName", () => {
-    let resolveRegistryEntryStub: sinon.SinonStub;
-    let getSourceStub: sinon.SinonStub;
-
-    const testOnePlatformSourceName = "projects/test-proj/sources/abc123";
-    const testRegistyEntry = {
-      labels: { latest: "0.1.1" },
-      versions: {
-        "0.1.0": "projects/test-proj/sources/def456",
-        "0.1.1": testOnePlatformSourceName,
-      },
-      publisher: "firebase",
-    };
-    const testSource: ExtensionSource = {
-      name: "test",
-      packageUri: "",
-      hash: "abc123",
-      state: "ACTIVE",
-      spec: {
-        name: "",
-        version: "0.0.0",
-        sourceUrl: "",
-        resources: [],
-        params: [],
-      },
-    };
-
-    beforeEach(() => {
-      resolveRegistryEntryStub = sinon
-        .stub(resolveSource, "resolveRegistryEntry")
-        .resolves(testRegistyEntry);
-      getSourceStub = sinon.stub(extensionsApi, "getSource").resolves(testSource);
-    });
-
-    afterEach(() => {
-      sinon.restore();
-    });
-
-    it("should look up official source names in the registry and fetch the ExtensionSource found there", async () => {
-      const testOfficialName = "storage-resize-images";
-
-      const result = await extensionsHelper.getExtensionSourceFromName(testOfficialName);
-
-      expect(resolveRegistryEntryStub).to.have.been.calledWith(testOfficialName);
-      expect(getSourceStub).to.have.been.calledWith(testOnePlatformSourceName);
-      expect(result).to.equal(testSource);
-    });
-
-    it("should fetch ExtensionSources when given a one platform name", async () => {
-      const result = await extensionsHelper.getExtensionSourceFromName(testOnePlatformSourceName);
-
-      expect(resolveRegistryEntryStub).not.to.have.been.called;
-      expect(getSourceStub).to.have.been.calledWith(testOnePlatformSourceName);
-      expect(result).to.equal(testSource);
-    });
-
-    it("should throw an error if given a invalid namae", async () => {
-      await expect(extensionsHelper.getExtensionSourceFromName(".")).to.be.rejectedWith(
-        FirebaseError
-      );
-
-      expect(resolveRegistryEntryStub).not.to.have.been.called;
-      expect(getSourceStub).not.to.have.been.called;
     });
   });
 
@@ -863,7 +895,7 @@ describe("extensionsHelper", () => {
     });
 
     it("should return false if no instance with that name exists", async () => {
-      getInstanceStub.resolves({ error: { code: 404 } });
+      getInstanceStub.throws(new FirebaseError("Not Found", { status: 404 }));
 
       const exists = await extensionsHelper.instanceIdExists("proj", TEST_NAME);
       expect(exists).to.be.false;
@@ -877,11 +909,96 @@ describe("extensionsHelper", () => {
     });
 
     it("should throw if it gets an unexpected error response from getInstance", async () => {
-      getInstanceStub.resolves({ error: { code: 500, message: "a message" } });
+      getInstanceStub.throws(new FirebaseError("Internal Error", { status: 500 }));
 
       await expect(extensionsHelper.instanceIdExists("proj", TEST_NAME)).to.be.rejectedWith(
         FirebaseError,
-        "Unexpected error when checking if instance ID exists: a message"
+        "Unexpected error when checking if instance ID exists: FirebaseError: Internal Error"
+      );
+    });
+  });
+
+  describe("getFirebaseProjectParams", () => {
+    const sandbox = sinon.createSandbox();
+    let projectNumberStub: sinon.SinonStub;
+    let getFirebaseConfigStub: sinon.SinonStub;
+
+    beforeEach(() => {
+      projectNumberStub = sandbox.stub(getProjectNumber, "getProjectNumber").resolves("1");
+      getFirebaseConfigStub = sandbox.stub(functionsConfig, "getFirebaseConfig").resolves({
+        projectId: "test",
+        storageBucket: "real-test.appspot.com",
+        databaseURL: "https://real-test.firebaseio.com",
+        locationId: "us-west1",
+      });
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it("should not call prodution when using a demo- project in emulator mode", async () => {
+      const res = await extensionsHelper.getFirebaseProjectParams("demo-test", true);
+
+      expect(res).to.deep.equal({
+        DATABASE_INSTANCE: "demo-test",
+        DATABASE_URL: "https://demo-test.firebaseio.com",
+        FIREBASE_CONFIG:
+          '{"projectId":"demo-test","databaseURL":"https://demo-test.firebaseio.com","storageBucket":"demo-test.appspot.com"}',
+        PROJECT_ID: "demo-test",
+        PROJECT_NUMBER: "0",
+        STORAGE_BUCKET: "demo-test.appspot.com",
+      });
+      expect(projectNumberStub).not.to.have.been.called;
+      expect(getFirebaseConfigStub).not.to.have.been.called;
+    });
+
+    it("should return real values for non 'demo-' projects", async () => {
+      const res = await extensionsHelper.getFirebaseProjectParams("real-test", false);
+
+      expect(res).to.deep.equal({
+        DATABASE_INSTANCE: "real-test",
+        DATABASE_URL: "https://real-test.firebaseio.com",
+        FIREBASE_CONFIG:
+          '{"projectId":"real-test","databaseURL":"https://real-test.firebaseio.com","storageBucket":"real-test.appspot.com"}',
+        PROJECT_ID: "real-test",
+        PROJECT_NUMBER: "1",
+        STORAGE_BUCKET: "real-test.appspot.com",
+      });
+      expect(projectNumberStub).to.have.been.called;
+      expect(getFirebaseConfigStub).to.have.been.called;
+    });
+  });
+
+  describe(`${canonicalizeRefInput.name}`, () => {
+    let resolveVersionStub: sinon.SinonStub;
+    beforeEach(() => {
+      resolveVersionStub = sinon.stub(planner, "resolveVersion").resolves("10.1.1");
+    });
+    afterEach(() => {
+      resolveVersionStub.restore();
+    });
+    it("should do nothing to a valid ref", async () => {
+      expect(await canonicalizeRefInput("firebase/bigquery-export@10.1.1")).to.equal(
+        "firebase/bigquery-export@10.1.1"
+      );
+    });
+
+    it("should infer latest version", async () => {
+      expect(await canonicalizeRefInput("firebase/bigquery-export")).to.equal(
+        "firebase/bigquery-export@10.1.1"
+      );
+    });
+
+    it("should infer publisher name as firebase", async () => {
+      expect(await canonicalizeRefInput("firebase/bigquery-export")).to.equal(
+        "firebase/bigquery-export@10.1.1"
+      );
+    });
+
+    it("should infer publisher name as firebase and also infer latest as version", async () => {
+      expect(await canonicalizeRefInput("bigquery-export")).to.equal(
+        "firebase/bigquery-export@10.1.1"
       );
     });
   });

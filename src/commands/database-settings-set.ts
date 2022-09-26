@@ -12,7 +12,7 @@ import { warnEmulatorNotSupported } from "../emulator/commandUtils";
 import { requireDatabaseInstance } from "../requireDatabaseInstance";
 import * as utils from "../utils";
 
-export default new Command("database:settings:set <path> <value>")
+export const command = new Command("database:settings:set <path> <value>")
   .description("set the realtime database setting at path.")
   .option(
     "--instance <instance>",
@@ -44,7 +44,7 @@ export default new Command("database:settings:set <path> <value>")
     const c = new Client({ urlPrefix: u.origin, auth: true });
     try {
       await c.put(u.pathname, JSON.stringify(parsedValue));
-    } catch (err) {
+    } catch (err: any) {
       throw new FirebaseError(`Unexpected error fetching configs at ${path}`, {
         exit: 2,
         original: err,

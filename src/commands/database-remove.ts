@@ -8,12 +8,11 @@ import { populateInstanceDetails } from "../management/database";
 import { realtimeOriginOrEmulatorOrCustomUrl } from "../database/api";
 import * as utils from "../utils";
 import { promptOnce } from "../prompt";
-import * as clc from "cli-color";
-import * as _ from "lodash";
+import * as clc from "colorette";
 
-module.exports = new Command("database:remove <path>")
+export const command = new Command("database:remove <path>")
   .description("remove data from your Firebase at the specified path")
-  .option("-y, --confirm", "pass this option to bypass confirmation prompt")
+  .option("-f, --force", "pass this option to bypass confirmation prompt")
   .option(
     "--instance <instance>",
     "use the database <instance>.firebaseio.com (if omitted, use default database instance)"
@@ -22,8 +21,8 @@ module.exports = new Command("database:remove <path>")
   .before(requireDatabaseInstance)
   .before(populateInstanceDetails)
   .before(warnEmulatorNotSupported, Emulators.DATABASE)
-  .action(async (path, options) => {
-    if (!_.startsWith(path, "/")) {
+  .action(async (path: string, options) => {
+    if (!path.startsWith("/")) {
       return utils.reject("Path must begin with /", { exit: 1 });
     }
     const origin = realtimeOriginOrEmulatorOrCustomUrl(options.instanceDetails.databaseUrl);
@@ -31,7 +30,7 @@ module.exports = new Command("database:remove <path>")
     const confirm = await promptOnce(
       {
         type: "confirm",
-        name: "confirm",
+        name: "force",
         default: false,
         message: "You are about to remove all data at " + clc.cyan(databaseUrl) + ". Are you sure?",
       },

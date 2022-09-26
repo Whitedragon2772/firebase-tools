@@ -1,10 +1,6 @@
 import * as uuid from "uuid";
 import { FunctionsEmulator } from "./functionsEmulator";
-import {
-  EmulatedTriggerDefinition,
-  getSignatureType,
-  SignatureType,
-} from "./functionsEmulatorShared";
+import { EmulatedTriggerDefinition } from "./functionsEmulatorShared";
 import * as utils from "../utils";
 import { logger } from "../logger";
 import { FirebaseError } from "../error";
@@ -67,8 +63,7 @@ export class FunctionsEmulatorShell implements FunctionsShellController {
       auth: opts.auth,
       data,
     };
-
-    this.emu.startFunctionRuntime(trigger.id, trigger.name, getSignatureType(trigger), proto);
+    this.emu.sendRequest(trigger, proto);
   }
 
   private getTrigger(name: string): EmulatedTriggerDefinition {

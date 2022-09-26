@@ -30,17 +30,17 @@ type DatabaseMultiple = ({
 }> &
   Deployable)[];
 
-type HostingSource = { source: string } | { regex: string };
+type HostingSource = { glob: string } | { source: string } | { regex: string };
 
 type HostingRedirects = HostingSource & {
   destination: string;
-  type: number;
+  type?: number;
 };
 
-type HostingRewrites = HostingSource &
+export type HostingRewrites = HostingSource &
   (
     | { destination: string }
-    | { function: string }
+    | { function: string; region?: string }
     | {
         run: {
           serviceId: string;
@@ -50,7 +50,7 @@ type HostingRewrites = HostingSource &
     | { dynamicLinks: boolean }
   );
 
-type HostingHeaders = HostingSource & {
+export type HostingHeaders = HostingSource & {
   headers: {
     key: string;
     value: string;
@@ -59,6 +59,7 @@ type HostingHeaders = HostingSource & {
 
 type HostingBase = {
   public?: string;
+  source?: string;
   ignore?: string[];
   appAssociation?: string;
   cleanUrls?: boolean;
@@ -102,12 +103,14 @@ export type FirestoreConfig = {
   indexes?: string;
 } & Deployable;
 
-export type FunctionsConfig = {
-  // TODO: Add types for "backend"
+export type FunctionConfig = {
   source?: string;
   ignore?: string[];
   runtime?: CloudFunctionRuntimes;
+  codebase?: string;
 } & Deployable;
+
+export type FunctionsConfig = FunctionConfig | FunctionConfig[];
 
 export type HostingConfig = HostingSingle | HostingMultiple;
 
@@ -159,7 +162,14 @@ export type EmulatorsConfig = {
     host?: string;
     port?: number | string;
   };
+  extensions?: {};
+  eventarc?: {
+    host?: string;
+    port?: number;
+  };
 };
+
+export type ExtensionsConfig = Record<string, string>;
 
 export type FirebaseConfig = {
   database?: DatabaseConfig;
@@ -169,4 +179,5 @@ export type FirebaseConfig = {
   storage?: StorageConfig;
   remoteconfig?: RemoteConfigConfig;
   emulators?: EmulatorsConfig;
+  extensions?: ExtensionsConfig;
 };

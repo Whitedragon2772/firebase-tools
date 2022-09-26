@@ -11,7 +11,7 @@ import { realtimeOriginOrEmulatorOrCustomUrl } from "../database/api";
 import { requirePermissions } from "../requirePermissions";
 import { logger } from "../logger";
 import { requireDatabaseInstance } from "../requireDatabaseInstance";
-import * as responseToError from "../responseToError";
+import { responseToError } from "../responseToError";
 import * as utils from "../utils";
 
 /**
@@ -47,7 +47,7 @@ function applyStringOpts(
   }
 }
 
-export default new Command("database:get <path>")
+export const command = new Command("database:get <path>")
   .description("fetch and print JSON data at the specified path")
   .option("-o, --output <filename>", "save output to the specified file")
   .option("--pretty", "pretty print response")
@@ -122,7 +122,7 @@ export default new Command("database:get <path>")
       let d;
       try {
         d = JSON.parse(r);
-      } catch (e) {
+      } catch (e: any) {
         throw new FirebaseError("Malformed JSON response", { original: e, exit: 2 });
       }
       throw responseToError({ statusCode: res.status }, d);
@@ -130,7 +130,7 @@ export default new Command("database:get <path>")
 
     res.body.pipe(outStream, { end: false });
 
-    return new Promise((resolve) => {
+    return new Promise<void>((resolve) => {
       // Tack on a single newline at the end of the stream.
       res.body.once("end", () => {
         if (outStream === process.stdout) {

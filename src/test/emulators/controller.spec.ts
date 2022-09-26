@@ -1,5 +1,4 @@
 import { Emulators } from "../../emulator/types";
-import { startEmulator } from "../../emulator/controller";
 import { EmulatorRegistry } from "../../emulator/registry";
 import { expect } from "chai";
 import { FakeEmulator } from "./fakeEmulator";
@@ -14,9 +13,9 @@ describe("EmulatorController", () => {
 
     expect(EmulatorRegistry.isRunning(name)).to.be.false;
 
-    await startEmulator(new FakeEmulator(name, "localhost", 7777));
+    await EmulatorRegistry.start(new FakeEmulator(name, "localhost", 7777));
 
     expect(EmulatorRegistry.isRunning(name)).to.be.true;
-    expect(EmulatorRegistry.getPort(name)).to.eql(7777);
+    expect(EmulatorRegistry.getInfo(name)!.port).to.eql(7777);
   });
 });

@@ -1,14 +1,14 @@
 import * as _ from "lodash";
 import * as url from "url";
 import * as http from "http";
-import * as clc from "cli-color";
+import * as clc from "colorette";
 import * as ora from "ora";
 import * as process from "process";
 import { Readable } from "stream";
 import * as winston from "winston";
 import { SPLAT } from "triple-beam";
 import { AssertionError } from "assert";
-const ansiStrip = require("cli-color/strip") as (input: string) => string;
+const stripAnsi = require("strip-ansi");
 
 import { configstore } from "./configstore";
 import { FirebaseError } from "./error";
@@ -19,6 +19,7 @@ import { Socket } from "net";
 const IS_WINDOWS = process.platform === "win32";
 const SUCCESS_CHAR = IS_WINDOWS ? "+" : "✔";
 const WARNING_CHAR = IS_WINDOWS ? "!" : "⚠";
+const ERROR_CHAR = IS_WINDOWS ? "!!" : "⬢";
 const THIRTY_DAYS_IN_MILLISECONDS = 30 * 24 * 60 * 60 * 1000;
 
 export const envOverrides: string[] = [];
@@ -38,7 +39,7 @@ export function consoleUrl(project: string, path: string): string {
 export function getInheritedOption(options: any, key: string): any {
   let target = options;
   while (target) {
-    if (_.has(target, key)) {
+    if (target[key] !== undefined) {
       return target[key];
     }
     target = target.parent;
@@ -61,7 +62,7 @@ export function envOverride(
     if (coerce) {
       try {
         return coerce(currentEnvValue, value);
-      } catch (e) {
+      } catch (e: any) {
         return value;
       }
     }
@@ -130,7 +131,7 @@ export function logSuccess(
   type: LogLevel = "info",
   data: LogDataOrUndefined = undefined
 ): void {
-  logger[type](clc.green.bold(`${SUCCESS_CHAR} `), message, data);
+  logger[type](clc.green(clc.bold(`${SUCCESS_CHAR} `)), message, data);
 }
 
 /**
@@ -142,7 +143,7 @@ export function logLabeledSuccess(
   type: LogLevel = "info",
   data: LogDataOrUndefined = undefined
 ): void {
-  logger[type](clc.green.bold(`${SUCCESS_CHAR}  ${label}:`), message, data);
+  logger[type](clc.green(clc.bold(`${SUCCESS_CHAR}  ${label}:`)), message, data);
 }
 
 /**
@@ -153,7 +154,7 @@ export function logBullet(
   type: LogLevel = "info",
   data: LogDataOrUndefined = undefined
 ): void {
-  logger[type](clc.cyan.bold("i "), message, data);
+  logger[type](clc.cyan(clc.bold("i ")), message, data);
 }
 
 /**
@@ -165,7 +166,7 @@ export function logLabeledBullet(
   type: LogLevel = "info",
   data: LogDataOrUndefined = undefined
 ): void {
-  logger[type](clc.cyan.bold(`i  ${label}:`), message, data);
+  logger[type](clc.cyan(clc.bold(`i  ${label}:`)), message, data);
 }
 
 /**
@@ -176,7 +177,7 @@ export function logWarning(
   type: LogLevel = "warn",
   data: LogDataOrUndefined = undefined
 ): void {
-  logger[type](clc.yellow.bold(`${WARNING_CHAR} `), message, data);
+  logger[type](clc.yellow(clc.bold(`${WARNING_CHAR} `)), message, data);
 }
 
 /**
@@ -188,7 +189,19 @@ export function logLabeledWarning(
   type: LogLevel = "warn",
   data: LogDataOrUndefined = undefined
 ): void {
-  logger[type](clc.yellow.bold(`${WARNING_CHAR}  ${label}:`), message, data);
+  logger[type](clc.yellow(clc.bold(`${WARNING_CHAR}  ${label}:`)), message, data);
+}
+
+/**
+ * Log an rror statement with a red bullet at the start of the line.
+ */
+export function logLabeledError(
+  label: string,
+  message: string,
+  type: LogLevel = "error",
+  data: LogDataOrUndefined = undefined
+): void {
+  logger[type](clc.red(clc.bold(`${ERROR_CHAR}  ${label}:`)), message, data);
 }
 
 /**
@@ -217,9 +230,7 @@ export type PromiseResult<T> = PromiseFulfilledResult<T> | PromiseRejectedResult
  * TODO: delete once min Node version is 12.9.0 or greater
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function allSettled<T extends any>(
-  promises: Array<Promise<T>>
-): Promise<Array<PromiseResult<T>>> {
+export function allSettled<T>(promises: Array<Promise<T>>): Promise<Array<PromiseResult<T>>> {
   if (!promises.length) {
     return Promise.resolve([]);
   }
@@ -301,7 +312,7 @@ export function streamToString(s: NodeJS.ReadableStream): Promise<string> {
 /**
  * Sets the active project alias or id in the specified directory.
  */
-export function makeActiveProject(projectDir: string, newActive: string | null): void {
+export function makeActiveProject(projectDir: string, newActive?: string): void {
   const activeProjects = configstore.get("activeProjects") || {};
   if (newActive) {
     activeProjects[projectDir] = newActive;
@@ -315,7 +326,7 @@ export function makeActiveProject(projectDir: string, newActive: string | null):
  * Creates API endpoint string, e.g. /v1/projects/pid/cloudfunctions
  */
 export function endpoint(parts: string[]): string {
-  return `/${_.join(parts, "/")}`;
+  return `/${parts.join("/")}`;
 }
 
 /**
@@ -326,7 +337,7 @@ export function getFunctionsEventProvider(eventType: string): string {
   // Legacy event types:
   const parts = eventType.split("/");
   if (parts.length > 1) {
-    const provider = _.last(parts[1].split("."));
+    const provider = last(parts[1].split("."));
     return _.capitalize(provider);
   }
   // New event types:
@@ -365,11 +376,11 @@ export type SettledPromise = SettledPromiseResolved | SettledPromiseRejected;
  * either resolved or rejected.
  */
 export function promiseAllSettled(promises: Array<Promise<any>>): Promise<SettledPromise[]> {
-  const wrappedPromises = _.map(promises, async (p) => {
+  const wrappedPromises = promises.map(async (p) => {
     try {
       const val = await Promise.resolve(p);
       return { state: "fulfilled", value: val } as SettledPromiseResolved;
-    } catch (err) {
+    } catch (err: any) {
       return { state: "rejected", reason: err } as SettledPromiseRejected;
     }
   });
@@ -393,11 +404,33 @@ export async function promiseWhile<T>(
           return resolve(res);
         }
         setTimeout(run, interval);
-      } catch (err) {
+      } catch (err: any) {
         return promiseReject(err);
       }
     };
     run();
+  });
+}
+
+/**
+ * Return a promise that rejects after timeoutMs but otherwise behave the same.
+ * @param timeoutMs the time in milliseconds before forced rejection
+ * @param promise the original promise
+ * @returns a promise wrapping the original promise with rejection on timeout
+ */
+export function withTimeout<T>(timeoutMs: number, promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Timed out.")), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      }
+    );
   });
 }
 
@@ -407,7 +440,7 @@ export async function promiseWhile<T>(
  */
 export async function promiseProps(obj: any): Promise<any> {
   const resultObj: any = {};
-  const promises = _.keys(obj).map(async (key) => {
+  const promises = Object.keys(obj).map(async (key) => {
     const r = await Promise.resolve(obj[key]);
     resultObj[key] = r;
   });
@@ -446,6 +479,9 @@ export function tryParse(value: any) {
   }
 }
 
+/**
+ *
+ */
 export function setupLoggers() {
   if (process.env.DEBUG) {
     logger.add(
@@ -453,7 +489,7 @@ export function setupLoggers() {
         level: "debug",
         format: winston.format.printf((info) => {
           const segments = [info.message, ...(info[SPLAT] || [])].map(tryStringify);
-          return `${ansiStrip(segments.join(" "))}`;
+          return `${stripAnsi(segments.join(" "))}`;
         }),
       })
     );
@@ -463,7 +499,7 @@ export function setupLoggers() {
         level: "info",
         format: winston.format.printf((info) =>
           [info.message, ...(info[SPLAT] || [])]
-            .filter((chunk) => typeof chunk == "string")
+            .filter((chunk) => typeof chunk === "string")
             .join(" ")
         ),
       })
@@ -480,7 +516,7 @@ export async function promiseWithSpinner<T>(action: () => Promise<T>, message: s
   try {
     data = await action();
     spinner.succeed();
-  } catch (err) {
+  } catch (err: any) {
     spinner.fail();
     throw err;
   }
@@ -494,7 +530,7 @@ export async function promiseWithSpinner<T>(action: () => Promise<T>, message: s
  *
  * Inspired by https://github.com/isaacs/server-destroy/blob/master/index.js
  *
- * @returns a function that destroys all connections and closes the server
+ * @return a function that destroys all connections and closes the server
  */
 export function createDestroyer(server: http.Server): () => Promise<void> {
   const connections = new Set<Socket>();
@@ -526,9 +562,10 @@ export function createDestroyer(server: http.Server): () => Promise<void> {
  * @return the formatted date.
  */
 export function datetimeString(d: Date): string {
-  const day = `${d.getFullYear()}-${(d.getMonth() + 1)
+  const day = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, "0")}-${d
+    .getDate()
     .toString()
-    .padStart(2, "0")}-${d.getDate().toString().padStart(2, "0")}`;
+    .padStart(2, "0")}`;
   const time = `${d.getHours().toString().padStart(2, "0")}:${d
     .getMinutes()
     .toString()
@@ -570,6 +607,9 @@ export function assertDefined<T>(val: T, message?: string): asserts val is NonNu
   }
 }
 
+/**
+ *
+ */
 export function assertIsString(val: any, message?: string): asserts val is string {
   if (typeof val !== "string") {
     throw new AssertionError({
@@ -578,6 +618,9 @@ export function assertIsString(val: any, message?: string): asserts val is strin
   }
 }
 
+/**
+ *
+ */
 export function assertIsNumber(val: any, message?: string): asserts val is number {
   if (typeof val !== "number") {
     throw new AssertionError({
@@ -586,6 +629,9 @@ export function assertIsNumber(val: any, message?: string): asserts val is numbe
   }
 }
 
+/**
+ *
+ */
 export function assertIsStringOrUndefined(
   val: any,
   message?: string
@@ -595,4 +641,103 @@ export function assertIsStringOrUndefined(
       message: message || `expected "string" or "undefined" but got "${typeof val}"`,
     });
   }
+}
+
+/**
+ * Polyfill for groupBy.
+ */
+export function groupBy<T, K extends string | number | symbol>(
+  arr: T[],
+  f: (item: T) => K
+): Record<K, T[]> {
+  return arr.reduce((result, item) => {
+    const key = f(item);
+    if (result[key]) {
+      result[key].push(item);
+    } else {
+      result[key] = [item];
+    }
+    return result;
+  }, {} as Record<K, T[]>);
+}
+
+function cloneArray<T>(arr: T[]): T[] {
+  return arr.map((e) => cloneDeep(e));
+}
+
+function cloneObject<T extends Record<string, unknown>>(obj: T): T {
+  const clone: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    clone[k] = cloneDeep(v);
+  }
+  return clone as T;
+}
+
+/**
+ * replacement for lodash cloneDeep that preserves type.
+ */
+// TODO: replace with builtin once Node 18 becomes the min version.
+export function cloneDeep<T>(obj: T): T {
+  if (typeof obj !== "object" || !obj) {
+    return obj;
+  }
+  if (obj instanceof RegExp) {
+    return RegExp(obj, obj.flags) as typeof obj;
+  }
+  if (obj instanceof Date) {
+    return new Date(obj) as typeof obj;
+  }
+  if (Array.isArray(obj)) {
+    return cloneArray(obj) as typeof obj;
+  }
+  if (obj instanceof Map) {
+    return new Map(obj.entries()) as typeof obj;
+  }
+  return cloneObject(obj as Record<string, unknown>) as typeof obj;
+}
+
+/**
+ * Returns the last element in the array, or undefined if no array is passed or
+ * the array is empty.
+ */
+export function last<T>(arr?: Array<T>): T | undefined {
+  if (!Array.isArray(arr)) {
+    return;
+  }
+  return arr[arr.length - 1];
+}
+
+/**
+ * Options for debounce.
+ */
+type DebounceOptions = {
+  leading?: boolean;
+};
+
+/**
+ * Returns a function that delays invoking `fn` until `delay` ms have
+ * passed since the last time `fn` was invoked.
+ */
+export function debounce<T>(
+  fn: (...args: T[]) => void,
+  delay: number,
+  { leading }: DebounceOptions = {}
+): (...args: T[]) => void {
+  let timer: NodeJS.Timeout;
+  return (...args) => {
+    if (!timer && leading) {
+      fn(...args);
+    }
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+/**
+ * Returns a random number between min and max, inclusive.
+ */
+export function randomInt(min: number, max: number): number {
+  min = Math.floor(min);
+  max = Math.ceil(max) + 1;
+  return Math.floor(Math.random() * (max - min) + min);
 }

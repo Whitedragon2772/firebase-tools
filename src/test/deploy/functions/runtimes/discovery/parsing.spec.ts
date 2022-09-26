@@ -35,7 +35,18 @@ describe("requireKeys", () => {
 });
 
 describe("assertKeyTypes", () => {
-  const tests = ["string", "number", "boolean", "array", "object"];
+  const tests = [
+    "string",
+    "number",
+    "boolean",
+    "array",
+    "object",
+    "string?",
+    "number?",
+    "boolean?",
+    "array?",
+    "object?",
+  ];
   const values = {
     null: null,
     undefined: undefined,
@@ -46,18 +57,51 @@ describe("assertKeyTypes", () => {
     object: {},
   };
   for (const type of tests) {
-    const schema = { [type]: type as parsing.KeyType };
     for (const [testType, val] of Object.entries(values)) {
+      const schema = { [type]: type as parsing.FieldType<typeof val> };
       it(`handles a ${testType} when expecting a ${type}`, () => {
         const obj = { [type]: val };
-        if (type === testType) {
-          expect(() => parsing.assertKeyTypes("", obj, schema)).not.to.throw;
+        const isNullable = type.endsWith("?");
+        const baseType = type.split("?")[0];
+        if (testType === "null") {
+          if (isNullable) {
+            expect(() => parsing.assertKeyTypes("", obj, schema)).not.to.throw();
+          } else {
+            expect(() => parsing.assertKeyTypes("", obj, schema)).to.throw(FirebaseError);
+          }
+        } else if (testType === baseType) {
+          expect(() => parsing.assertKeyTypes("", obj, schema)).not.to.throw();
         } else {
           expect(() => parsing.assertKeyTypes("", obj, schema)).to.throw(FirebaseError);
         }
       });
     }
   }
+
+  it("handles validator functions", () => {
+    interface hasCPU {
+      cpu: number | "gcf_gen1";
+    }
+
+    const literalCPU: hasCPU = {
+      cpu: 1,
+    };
+
+    const symbolicCPU: hasCPU = {
+      cpu: "gcf_gen1",
+    };
+
+    const badCPU: hasCPU = {
+      cpu: "bad" as any,
+    };
+
+    const schema = {
+      cpu: (val: hasCPU["cpu"]) => typeof val === "number" || val === "gcf_gen1",
+    };
+    expect(() => parsing.assertKeyTypes("", literalCPU, schema)).to.not.throw();
+    expect(() => parsing.assertKeyTypes("", symbolicCPU, schema)).to.not.throw();
+    expect(() => parsing.assertKeyTypes("", badCPU, schema)).to.throw();
+  });
 
   it("Throws on superfluous keys", () => {
     const obj = { foo: "bar", number: 1 } as any;
@@ -78,7 +122,7 @@ describe("assertKeyTypes", () => {
         foo: "string",
         number: "omit",
       })
-    );
+    ).to.throw(/Unexpected key/);
   });
 
   it("Handles prefixes", () => {
@@ -89,6 +133,6 @@ describe("assertKeyTypes", () => {
       parsing.assertKeyTypes("outer", obj, {
         foo: "array",
       })
-    ).to.throw(FirebaseError, "Expected outer.foo to be an array");
+    ).to.throw(FirebaseError, "Expected outer.foo to be type array");
   });
 });

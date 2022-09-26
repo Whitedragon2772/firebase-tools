@@ -81,25 +81,27 @@ export class EmulatorHub implements EmulatorInstance {
 
     this.hub.get(EmulatorHub.PATH_EMULATORS, (req, res) => {
       const body: GetEmulatorsResponse = {};
-      EmulatorRegistry.listRunning().forEach((name) => {
-        body[name] = EmulatorRegistry.get(name)!.getInfo();
-      });
+      for (const emulator of EmulatorRegistry.listRunning()) {
+        const info = EmulatorRegistry.getInfo(emulator);
+        body[emulator] = info!;
+      }
       res.json(body);
     });
 
     this.hub.post(EmulatorHub.PATH_EXPORT, async (req, res) => {
-      const exportPath = req.body.path;
-      utils.logLabeledBullet(
-        "emulators",
-        `Received export request. Exporting data to ${exportPath}.`
-      );
+      const path: string = req.body.path;
+      const initiatedBy: string = req.body.initiatedBy || "unknown";
+      utils.logLabeledBullet("emulators", `Received export request. Exporting data to ${path}.`);
       try {
-        await new HubExport(this.args.projectId, exportPath).exportAll();
+        await new HubExport(this.args.projectId, {
+          path,
+          initiatedBy,
+        }).exportAll();
         utils.logLabeledSuccess("emulators", "Export complete.");
         res.status(200).send({
           message: "OK",
         });
-      } catch (e) {
+      } catch (e: any) {
         const errorString = e.message || JSON.stringify(e);
         utils.logLabeledWarning("emulators", `Export failed: ${errorString}`);
         res.status(500).json({
@@ -162,7 +164,7 @@ export class EmulatorHub implements EmulatorInstance {
   }
 
   getInfo(): EmulatorInfo {
-    const host = this.args.host || Constants.getDefaultHost(Emulators.HUB);
+    const host = this.args.host || Constants.getDefaultHost();
     const port = this.args.port || Constants.getDefaultPort(Emulators.HUB);
 
     return {

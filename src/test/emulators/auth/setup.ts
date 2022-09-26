@@ -19,7 +19,7 @@ export function describeAuthEmulator(
   return describe(`Auth Emulator: ${title}`, function (this) {
     let authApp: Express.Application;
     beforeEach("setup or reuse auth server", async function (this) {
-      this.timeout(10000);
+      this.timeout(20000);
       authApp = await createOrReuseApp();
     });
 

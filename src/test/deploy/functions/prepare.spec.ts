@@ -2,23 +2,24 @@ import { expect } from "chai";
 
 import * as backend from "../../../deploy/functions/backend";
 import * as prepare from "../../../deploy/functions/prepare";
+import { BEFORE_CREATE_EVENT, BEFORE_SIGN_IN_EVENT } from "../../../functions/events/v1";
 
 describe("prepare", () => {
+  const ENDPOINT_BASE: Omit<backend.Endpoint, "httpsTrigger"> = {
+    platform: "gcfv2",
+    id: "id",
+    region: "region",
+    project: "project",
+    entryPoint: "entry",
+    runtime: "nodejs16",
+  };
+
+  const ENDPOINT: backend.Endpoint = {
+    ...ENDPOINT_BASE,
+    httpsTrigger: {},
+  };
+
   describe("inferDetailsFromExisting", () => {
-    const ENDPOINT_BASE: Omit<backend.Endpoint, "httpsTrigger"> = {
-      platform: "gcfv2",
-      id: "id",
-      region: "region",
-      project: "project",
-      entryPoint: "entry",
-      runtime: "nodejs16",
-    };
-
-    const ENDPOINT: backend.Endpoint = {
-      ...ENDPOINT_BASE,
-      httpsTrigger: {},
-    };
-
     it("merges env vars if .env is not used", () => {
       const oldE = {
         ...ENDPOINT,
@@ -79,9 +80,7 @@ describe("prepare", () => {
         ...ENDPOINT_BASE,
         eventTrigger: {
           eventType: "google.cloud.storage.object.v1.finalized",
-          eventFilters: {
-            bucket: "bucket",
-          },
+          eventFilters: { bucket: "bucket" },
           retry: false,
         },
       };
@@ -98,15 +97,13 @@ describe("prepare", () => {
         ...ENDPOINT_BASE,
         eventTrigger: {
           eventType: "google.cloud.storage.object.v1.finalzied",
-          eventFilters: {
-            bucket: "us-bucket",
-          },
+          eventFilters: { bucket: "us-bucket" },
           retry: false,
         },
       };
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const have: backend.Endpoint & backend.EventTriggered = JSON.parse(JSON.stringify(want));
-      have.eventTrigger.eventFilters["bucket"] = "us-central1-bucket";
+      have.eventTrigger.eventFilters = { bucket: "us-central1-bucket" };
       have.eventTrigger.region = "us-central1";
 
       prepare.inferDetailsFromExisting(backend.of(want), backend.of(have), /* usedDotEnv= */ false);
@@ -124,6 +121,121 @@ describe("prepare", () => {
 
       prepare.inferDetailsFromExisting(backend.of(want), backend.of(have), /* usedDotEnv= */ false);
       expect(want.availableMemoryMb).to.equal(512);
+    });
+  });
+
+  describe("inferBlockingDetails", () => {
+    it("should merge the blocking options and set default value", () => {
+      const beforeCreate: backend.Endpoint = {
+        ...ENDPOINT_BASE,
+        id: "beforeCreate",
+        blockingTrigger: {
+          eventType: BEFORE_CREATE_EVENT,
+          options: {
+            accessToken: true,
+            refreshToken: false,
+          },
+        },
+      };
+      const beforeSignIn: backend.Endpoint = {
+        ...ENDPOINT_BASE,
+        id: "beforeSignIn",
+        blockingTrigger: {
+          eventType: BEFORE_SIGN_IN_EVENT,
+          options: {
+            accessToken: false,
+            idToken: true,
+          },
+        },
+      };
+
+      prepare.inferBlockingDetails(backend.of(beforeCreate, beforeSignIn));
+
+      expect(beforeCreate.blockingTrigger.options?.accessToken).to.be.true;
+      expect(beforeCreate.blockingTrigger.options?.idToken).to.be.true;
+      expect(beforeCreate.blockingTrigger.options?.refreshToken).to.be.false;
+      expect(beforeSignIn.blockingTrigger.options?.accessToken).to.be.true;
+      expect(beforeSignIn.blockingTrigger.options?.idToken).to.be.true;
+      expect(beforeSignIn.blockingTrigger.options?.refreshToken).to.be.false;
+    });
+  });
+
+  describe("updateEndpointTargetedStatus", () => {
+    let endpoint1InBackend1: backend.Endpoint;
+    let endpoint2InBackend1: backend.Endpoint;
+    let endpoint1InBackend2: backend.Endpoint;
+    let endpoint2InBackend2: backend.Endpoint;
+
+    let backends: Record<string, backend.Backend>;
+
+    beforeEach(() => {
+      endpoint1InBackend1 = {
+        ...ENDPOINT,
+        id: "endpoint1",
+        platform: "gcfv1",
+        codebase: "backend1",
+      };
+      endpoint2InBackend1 = {
+        ...ENDPOINT,
+        id: "endpoint2",
+        platform: "gcfv1",
+        codebase: "backend1",
+      };
+      endpoint1InBackend2 = {
+        ...ENDPOINT,
+        id: "endpoint1",
+        platform: "gcfv2",
+        codebase: "backend2",
+      };
+      endpoint2InBackend2 = {
+        ...ENDPOINT,
+        id: "endpoint2",
+        platform: "gcfv2",
+        codebase: "backend2",
+      };
+
+      const backend1 = backend.of(endpoint1InBackend1, endpoint2InBackend1);
+      const backend2 = backend.of(endpoint1InBackend2, endpoint2InBackend2);
+
+      backends = { backend1, backend2 };
+    });
+
+    it("should mark targeted codebases", () => {
+      const filters = [{ codebase: "backend1" }];
+      // Execute
+      prepare.updateEndpointTargetedStatus(backends, filters);
+
+      // Expect
+      expect(endpoint1InBackend1.targetedByOnly).to.be.true;
+      expect(endpoint2InBackend1.targetedByOnly).to.be.true;
+      expect(endpoint1InBackend2.targetedByOnly).to.be.false;
+      expect(endpoint2InBackend2.targetedByOnly).to.be.false;
+    });
+
+    it("should mark targeted codebases + ids", () => {
+      const filters = [{ codebase: "backend1", idChunks: ["endpoint1"] }];
+
+      // Execute
+      prepare.updateEndpointTargetedStatus(backends, filters);
+
+      // Expect
+      expect(endpoint1InBackend1.targetedByOnly).to.be.true;
+      expect(endpoint2InBackend1.targetedByOnly).to.be.false;
+      expect(endpoint1InBackend2.targetedByOnly).to.be.false;
+      expect(endpoint2InBackend2.targetedByOnly).to.be.false;
+    });
+
+    it("should mark targeted ids", () => {
+      const filters = [{ idChunks: ["endpoint1"] }];
+
+      // Execute
+      prepare.updateEndpointTargetedStatus(backends, filters);
+
+      // Expect
+      expect(endpoint1InBackend1.targetedByOnly).to.be.true;
+      expect(endpoint2InBackend1.targetedByOnly).to.be.false;
+      expect(endpoint1InBackend1.targetedByOnly).to.be.true;
+      expect(endpoint2InBackend2.targetedByOnly).to.be.false;
     });
   });
 });

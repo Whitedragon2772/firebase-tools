@@ -7,9 +7,8 @@ import * as cloudlogging from "../gcp/cloudlogging";
 import * as functionsLog from "../functions/functionslog";
 import { needProjectId } from "../projectUtils";
 import { requirePermissions } from "../requirePermissions";
-import { previews } from "../previews";
 
-module.exports = new Command("functions:log")
+export const command = new Command("functions:log")
   .description("read logs from deployed functions")
   .option(
     "--only <function_names>",
@@ -37,7 +36,7 @@ module.exports = new Command("functions:log")
       );
       functionsLog.logEntries(entries);
       return entries;
-    } catch (err) {
+    } catch (err: any) {
       throw new FirebaseError(`Failed to list log entries ${err.message}`, { exit: 1 });
     }
   });

@@ -1,6 +1,5 @@
 import { ChildProcess } from "child_process";
 import { EventEmitter } from "events";
-import { previews } from "../previews";
 
 export enum Emulators {
   AUTH = "auth",
@@ -13,6 +12,8 @@ export enum Emulators {
   UI = "ui",
   LOGGING = "logging",
   STORAGE = "storage",
+  EXTENSIONS = "extensions",
+  EVENTARC = "eventarc",
 }
 
 export type DownloadableEmulators =
@@ -45,13 +46,15 @@ export const ALL_SERVICE_EMULATORS = [
   Emulators.HOSTING,
   Emulators.PUBSUB,
   Emulators.STORAGE,
-].filter((v) => v) as Emulators[];
+  Emulators.EVENTARC,
+].filter((v) => v);
 
 export const EMULATORS_SUPPORTED_BY_FUNCTIONS = [
   Emulators.FIRESTORE,
   Emulators.DATABASE,
   Emulators.PUBSUB,
   Emulators.STORAGE,
+  Emulators.EVENTARC,
 ];
 
 export const EMULATORS_SUPPORTED_BY_UI = [
@@ -60,6 +63,7 @@ export const EMULATORS_SUPPORTED_BY_UI = [
   Emulators.FIRESTORE,
   Emulators.FUNCTIONS,
   Emulators.STORAGE,
+  Emulators.EXTENSIONS,
 ];
 
 export const EMULATORS_SUPPORTED_BY_USE_EMULATOR = [
@@ -67,6 +71,7 @@ export const EMULATORS_SUPPORTED_BY_USE_EMULATOR = [
   Emulators.DATABASE,
   Emulators.FIRESTORE,
   Emulators.FUNCTIONS,
+  Emulators.STORAGE,
 ];
 
 // TODO: Is there a way we can just allow iteration over the enum?
@@ -74,6 +79,7 @@ export const ALL_EMULATORS = [
   Emulators.HUB,
   Emulators.UI,
   Emulators.LOGGING,
+  Emulators.EXTENSIONS,
   ...ALL_SERVICE_EMULATORS,
 ];
 
@@ -210,7 +216,7 @@ export class EmulatorLog {
     type: string,
     filter?: (el: EmulatorLog) => boolean
   ): Promise<EmulatorLog> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const listener = (el: EmulatorLog) => {
         const levelTypeMatch = el.level === level && el.type === type;
         let filterMatch = true;
@@ -232,7 +238,7 @@ export class EmulatorLog {
     let isNotJSON = false;
     try {
       parsedLog = JSON.parse(json);
-    } catch (err) {
+    } catch (err: any) {
       isNotJSON = true;
     }
 

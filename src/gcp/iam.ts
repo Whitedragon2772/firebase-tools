@@ -1,9 +1,8 @@
-import * as api from "../api";
-import { endpoint } from "../utils";
-import { difference } from "lodash";
+import { resourceManagerOrigin, iamOrigin } from "../api";
 import { logger } from "../logger";
+import { Client } from "../apiv2";
 
-const API_VERSION = "v1";
+const apiClient = new Client({ urlPrefix: iamOrigin, apiVersion: "v1" });
 
 // IAM Policy
 // https://cloud.google.com/resource-manager/reference/rest/Shared.Types/Policy
@@ -31,6 +30,12 @@ export interface ServiceAccount {
   disabled: boolean;
 }
 
+export interface Role {
+  name: string;
+  title?: string;
+  description?: string;
+}
+
 export interface ServiceAccountKey {
   name: string;
   privateKeyType: string;
@@ -41,6 +46,12 @@ export interface ServiceAccountKey {
   validBeforeTime: string;
   keyOrigin: string;
   keyType: string;
+}
+
+export interface TestIamResult {
+  allowed: string[];
+  missing: string[];
+  passed: boolean;
 }
 
 /**
@@ -56,22 +67,20 @@ export async function createServiceAccount(
   accountId: string,
   description: string,
   displayName: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<any> {
-  const response = await api.request(
-    "POST",
-    `/${API_VERSION}/projects/${projectId}/serviceAccounts`,
+): Promise<ServiceAccount> {
+  const response = await apiClient.post<
+    { accountId: string; serviceAccount: { displayName: string; description: string } },
+    ServiceAccount
+  >(
+    `/projects/${projectId}/serviceAccounts`,
     {
-      auth: true,
-      origin: api.iamOrigin,
-      data: {
-        accountId,
-        serviceAccount: {
-          displayName,
-          description,
-        },
+      accountId,
+      serviceAccount: {
+        displayName,
+        description,
       },
-    }
+    },
+    { skipLog: { resBody: true } }
   );
   return response.body;
 }
@@ -86,53 +95,40 @@ export async function getServiceAccount(
   projectId: string,
   serviceAccountName: string
 ): Promise<ServiceAccount> {
-  const response = await api.request(
-    "GET",
-    `/${API_VERSION}/projects/${projectId}/serviceAccounts/${serviceAccountName}@${projectId}.iam.gserviceaccount.com`,
-    {
-      auth: true,
-      origin: api.iamOrigin,
-    }
+  const response = await apiClient.get<ServiceAccount>(
+    `/projects/${projectId}/serviceAccounts/${serviceAccountName}@${projectId}.iam.gserviceaccount.com`
   );
   return response.body;
 }
 
+/**
+ * Creates a key for a given service account.
+ */
 export async function createServiceAccountKey(
   projectId: string,
   serviceAccountName: string
 ): Promise<ServiceAccountKey> {
-  const response = await api.request(
-    "POST",
-    `/${API_VERSION}/projects/${projectId}/serviceAccounts/${serviceAccountName}@${projectId}.iam.gserviceaccount.com/keys`,
+  const response = await apiClient.post<
+    { keyAlgorithm: string; privateKeyType: string },
+    ServiceAccountKey
+  >(
+    `/projects/${projectId}/serviceAccounts/${serviceAccountName}@${projectId}.iam.gserviceaccount.com/keys`,
     {
-      auth: true,
-      origin: api.iamOrigin,
-      data: {
-        keyAlgorithm: "KEY_ALG_UNSPECIFIED",
-        privateKeyType: "TYPE_GOOGLE_CREDENTIALS_FILE",
-      },
+      keyAlgorithm: "KEY_ALG_UNSPECIFIED",
+      privateKeyType: "TYPE_GOOGLE_CREDENTIALS_FILE",
     }
   );
   return response.body;
 }
 
 /**
- *
  * @param projectId the id of the project containing the service account
  * @param accountEmail the email of the service account to delete
- * @return The raw API response, including status, body, etc.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function deleteServiceAccount(projectId: string, accountEmail: string): Promise<any> {
-  return api.request(
-    "DELETE",
-    `/${API_VERSION}/projects/${projectId}/serviceAccounts/${accountEmail}`,
-    {
-      auth: true,
-      origin: api.iamOrigin,
-      resolveOnHTTPError: true,
-    }
-  );
+export async function deleteServiceAccount(projectId: string, accountEmail: string): Promise<void> {
+  await apiClient.delete(`/projects/${projectId}/serviceAccounts/${accountEmail}`, {
+    resolveOnHTTPError: true,
+  });
 }
 
 /**
@@ -142,19 +138,11 @@ export function deleteServiceAccount(projectId: string, accountEmail: string): P
  * @param role The IAM role to get, e.g. "editor".
  * @return Details about the IAM role.
  */
-export async function getRole(role: string): Promise<{ title: string; description: string }> {
-  const response = await api.request("GET", endpoint([API_VERSION, "roles", role]), {
-    auth: true,
-    origin: api.iamOrigin,
+export async function getRole(role: string): Promise<Role> {
+  const response = await apiClient.get<Role>(`/roles/${role}`, {
     retryCodes: [500, 503],
   });
   return response.body;
-}
-
-export interface TestIamResult {
-  allowed: string[];
-  missing: string[];
-  passed: boolean;
 }
 
 /**
@@ -169,30 +157,38 @@ export async function testResourceIamPermissions(
   origin: string,
   apiVersion: string,
   resourceName: string,
-  permissions: string[]
+  permissions: string[],
+  quotaUser = ""
 ): Promise<TestIamResult> {
+  const localClient = new Client({ urlPrefix: origin, apiVersion });
   if (process.env.FIREBASE_SKIP_INFORMATIONAL_IAM) {
     logger.debug(
-      "[iam] skipping informational check of permissions",
-      JSON.stringify(permissions),
-      "on resource",
-      resourceName
+      `[iam] skipping informational check of permissions ${JSON.stringify(
+        permissions
+      )} on resource ${resourceName}`
     );
-    return { allowed: permissions, missing: [], passed: true };
+    return { allowed: Array.from(permissions).sort(), missing: [], passed: true };
   }
-  const response = await api.request("POST", `/${apiVersion}/${resourceName}:testIamPermissions`, {
-    auth: true,
-    data: { permissions },
-    origin,
-  });
+  const headers: Record<string, string> = {};
+  if (quotaUser) {
+    headers["x-goog-quota-user"] = quotaUser;
+  }
+  const response = await localClient.post<{ permissions: string[] }, { permissions: string[] }>(
+    `/${resourceName}:testIamPermissions`,
+    { permissions },
+    { headers }
+  );
 
-  const allowed = (response.body.permissions || []).sort();
-  const missing = difference(permissions, allowed);
+  const allowed = new Set(response.body.permissions || []);
+  const missing = new Set(permissions);
+  for (const p of allowed) {
+    missing.delete(p);
+  }
 
   return {
-    allowed,
-    missing,
-    passed: missing.length === 0,
+    allowed: Array.from(allowed).sort(),
+    missing: Array.from(missing).sort(),
+    passed: missing.size === 0,
   };
 }
 
@@ -206,9 +202,10 @@ export async function testIamPermissions(
   permissions: string[]
 ): Promise<TestIamResult> {
   return testResourceIamPermissions(
-    api.resourceManagerOrigin,
+    resourceManagerOrigin,
     "v1",
     `projects/${projectId}`,
-    permissions
+    permissions,
+    `projects/${projectId}`
   );
 }

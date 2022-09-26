@@ -1,12 +1,11 @@
 import * as _ from "lodash";
-import * as clc from "cli-color";
-import * as path from "path";
+import * as clc from "colorette";
 import * as semver from "semver";
 import * as spawn from "cross-spawn";
 
 import * as utils from "../../../../utils";
 import { logger } from "../../../../logger";
-import * as track from "../../../../track";
+import { track } from "../../../../track";
 
 interface NpmListResult {
   name: string;
@@ -28,7 +27,7 @@ interface NpmShowResult {
 const MIN_SDK_VERSION = "2.0.0";
 
 export const FUNCTIONS_SDK_VERSION_TOO_OLD_WARNING =
-  clc.bold.yellow("functions: ") +
+  clc.bold(clc.yellow("functions: ")) +
   "You must have a " +
   clc.bold("firebase-functions") +
   " version that is at least 2.0.0. Please run " +
@@ -53,7 +52,7 @@ export function getFunctionsSDKVersion(sourceDir: string): string | void {
     }
     const output: NpmListResult = JSON.parse(child.stdout);
     return _.get(output, ["dependencies", "firebase-functions", "version"]);
-  } catch (e) {
+  } catch (e: any) {
     logger.debug("getFunctionsSDKVersion encountered error:", e);
     return;
   }
@@ -85,7 +84,7 @@ export function getLatestSDKVersion(): string | undefined {
 export function checkFunctionsSDKVersion(currentVersion: string): void {
   try {
     if (semver.lt(currentVersion, MIN_SDK_VERSION)) {
-      track("functions_runtime_notices", "functions_sdk_too_old");
+      void track("functions_runtime_notices", "functions_sdk_too_old");
       utils.logWarning(FUNCTIONS_SDK_VERSION_TOO_OLD_WARNING);
     }
 
@@ -99,18 +98,18 @@ export function checkFunctionsSDKVersion(currentVersion: string): void {
       return;
     }
     utils.logWarning(
-      clc.bold.yellow("functions: ") +
-        "package.json indicates an outdated version of firebase-functions.\nPlease upgrade using " +
+      clc.bold(clc.yellow("functions: ")) +
+        "package.json indicates an outdated version of firebase-functions. Please upgrade using " +
         clc.bold("npm install --save firebase-functions@latest") +
         " in your functions directory."
     );
     if (semver.major(currentVersion) < semver.major(latest)) {
       utils.logWarning(
-        clc.bold.yellow("functions: ") +
+        clc.bold(clc.yellow("functions: ")) +
           "Please note that there will be breaking changes when you upgrade."
       );
     }
-  } catch (e) {
+  } catch (e: any) {
     logger.debug("checkFunctionsSDKVersion encountered error:", e);
     return;
   }

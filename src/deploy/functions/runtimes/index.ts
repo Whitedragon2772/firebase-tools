@@ -1,6 +1,5 @@
-import { Options } from "../../../options";
 import * as backend from "../backend";
-import * as args from "../args";
+import * as build from "../build";
 import * as golang from "./golang";
 import * as node from "./node";
 import * as validate from "../validate";
@@ -94,42 +93,43 @@ export interface RuntimeDelegate {
   // for this to reuse or keep alive an HTTP server. This will speed up the emulator
   // by only loading customer code once. This part of the interface will be easier
   // to figure out as we go.
-  discoverSpec(
+  discoverBuild(
     configValues: backend.RuntimeConfigValues,
     envs: backend.EnvironmentVariables
-  ): Promise<backend.Backend>;
+  ): Promise<build.Build>;
 }
 
-type Factory = (context: args.Context, options: Options) => Promise<RuntimeDelegate | undefined>;
+export interface DelegateContext {
+  projectId: string;
+  // Absolute path of the Firebase project directory.
+  projectDir: string;
+  // Absolute path of the source directory.
+  sourceDir: string;
+  runtime?: string;
+}
+
+type Factory = (context: DelegateContext) => Promise<RuntimeDelegate | undefined>;
 const factories: Factory[] = [node.tryCreateDelegate, golang.tryCreateDelegate];
 
-export async function getRuntimeDelegate(
-  context: args.Context,
-  options: Options
-): Promise<RuntimeDelegate> {
-  const sourceDirName = options.config.get("functions.source") as string;
-  if (!sourceDirName) {
-    throw new FirebaseError(
-      `No functions code detected at default location (./functions), and no functions.source defined in firebase.json`
-    );
-  }
-  validate.functionsDirectoryExists(options, sourceDirName);
+/**
+ *
+ */
+export async function getRuntimeDelegate(context: DelegateContext): Promise<RuntimeDelegate> {
+  const { projectDir, sourceDir, runtime } = context;
+  validate.functionsDirectoryExists(sourceDir, projectDir);
 
   // There isn't currently an easy way to map from runtime name to a delegate, but we can at least guarantee
   // that any explicit runtime from firebase.json is valid
-  const runtime = options.config.get("functions.runtime");
   if (runtime && !isValidRuntime(runtime)) {
-    throw new FirebaseError("Cannot deploy function with runtime " + runtime);
+    throw new FirebaseError(`Cannot deploy function with runtime ${runtime}`);
   }
 
   for (const factory of factories) {
-    const delegate = await factory(context, options);
+    const delegate = await factory(context);
     if (delegate) {
       return delegate;
     }
   }
 
-  throw new FirebaseError(
-    `Could not detect language for functions at ${options.config.get("functions.source")}`
-  );
+  throw new FirebaseError(`Could not detect language for functions at ${sourceDir}`);
 }

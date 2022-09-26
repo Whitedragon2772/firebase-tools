@@ -3,14 +3,16 @@
  * Internal documentation: https://source.corp.google.com/piper///depot/google3/google/firebase/database/v1beta/rtdb_service.proto
  */
 
-import * as api from "../api";
-import { logger } from "../logger";
-import * as utils from "../utils";
-import { FirebaseError } from "../error";
+import { Client } from "../apiv2";
 import { Constants } from "../emulator/constants";
-const MGMT_API_VERSION = "v1beta";
+import { FirebaseError } from "../error";
+import { logger } from "../logger";
+import { rtdbManagementOrigin } from "../api";
+import * as utils from "../utils";
+
+export const MGMT_API_VERSION = "v1beta";
+export const APP_LIST_PAGE_SIZE = 100;
 const TIMEOUT_MILLIS = 10000;
-const APP_LIST_PAGE_SIZE = 100;
 const INSTANCE_RESOURCE_NAME_REGEX = /projects\/([^/]+?)\/locations\/([^/]+?)\/instances\/([^/]*)/;
 
 export enum DatabaseInstanceType {
@@ -42,6 +44,8 @@ export interface DatabaseInstance {
   state: DatabaseInstanceState;
 }
 
+const apiClient = new Client({ urlPrefix: rtdbManagementOrigin, apiVersion: MGMT_API_VERSION });
+
 /**
  * Populate instanceDetails in commandOptions.
  * @param options command options that will be modified to add instanceDetails.
@@ -62,18 +66,13 @@ export async function getDatabaseInstanceDetails(
   instanceName: string
 ): Promise<DatabaseInstance> {
   try {
-    const response = await api.request(
-      "GET",
-      `/${MGMT_API_VERSION}/projects/${projectId}/locations/-/instances/${instanceName}`,
-      {
-        auth: true,
-        origin: api.rtdbManagementOrigin,
-        timeout: TIMEOUT_MILLIS,
-      }
-    );
-
+    const response = await apiClient.request({
+      method: "GET",
+      path: `/projects/${projectId}/locations/-/instances/${instanceName}`,
+      timeout: TIMEOUT_MILLIS,
+    });
     return convertDatabaseInstance(response.body);
-  } catch (err) {
+  } catch (err: any) {
     logger.debug(err.message);
     const emulatorHost = process.env[Constants.FIREBASE_DATABASE_EMULATOR_HOST];
     if (emulatorHost) {
@@ -88,10 +87,10 @@ export async function getDatabaseInstanceDetails(
         state: DatabaseInstanceState.ACTIVE,
       });
     }
-    return utils.reject(
+    throw new FirebaseError(
       `Failed to get instance details for instance: ${instanceName}. See firebase-debug.log for more details.`,
       {
-        code: 2,
+        exit: 2,
         original: err,
       }
     );
@@ -112,21 +111,16 @@ export async function createInstance(
   databaseType: DatabaseInstanceType
 ): Promise<DatabaseInstance> {
   try {
-    const response = await api.request(
-      "POST",
-      `/${MGMT_API_VERSION}/projects/${projectId}/locations/${location}/instances?databaseId=${instanceName}`,
-      {
-        auth: true,
-        origin: api.rtdbManagementOrigin,
-        timeout: TIMEOUT_MILLIS,
-        data: {
-          type: databaseType,
-        },
-      }
-    );
+    const response = await apiClient.request({
+      method: "POST",
+      path: `/projects/${projectId}/locations/${location}/instances`,
+      queryParams: { databaseId: instanceName },
+      body: { type: databaseType },
+      timeout: TIMEOUT_MILLIS,
+    });
 
     return convertDatabaseInstance(response.body);
-  } catch (err) {
+  } catch (err: any) {
     logger.debug(err.message);
     return utils.reject(
       `Failed to create instance: ${instanceName}. See firebase-debug.log for more details.`,
@@ -156,22 +150,15 @@ export async function checkInstanceNameAvailable(
     location = DatabaseLocation.US_CENTRAL1;
   }
   try {
-    await api.request(
-      "POST",
-      `/${MGMT_API_VERSION}/projects/${projectId}/locations/${location}/instances?databaseId=${instanceName}&validateOnly=true`,
-      {
-        auth: true,
-        origin: api.rtdbManagementOrigin,
-        timeout: TIMEOUT_MILLIS,
-        data: {
-          type: databaseType,
-        },
-      }
-    );
-    return {
-      available: true,
-    };
-  } catch (err) {
+    await apiClient.request({
+      method: "POST",
+      path: `/projects/${projectId}/locations/${location}/instances`,
+      queryParams: { databaseId: instanceName, validateOnly: "true" },
+      body: { type: databaseType },
+      timeout: TIMEOUT_MILLIS,
+    });
+    return { available: true };
+  } catch (err: any) {
     logger.debug(
       `Invalid Realtime Database instance name: ${instanceName}.${
         err.message ? " " + err.message : ""
@@ -237,18 +224,18 @@ export async function listDatabaseInstances(
 ): Promise<DatabaseInstance[]> {
   const instances: DatabaseInstance[] = [];
   try {
-    let nextPageToken = "";
+    let nextPageToken: string | undefined = "";
     do {
-      const pageTokenQueryString = nextPageToken ? `&pageToken=${nextPageToken}` : "";
-      const response = await api.request(
-        "GET",
-        `/${MGMT_API_VERSION}/projects/${projectId}/locations/${location}/instances?pageSize=${pageSize}${pageTokenQueryString}`,
-        {
-          auth: true,
-          origin: api.rtdbManagementOrigin,
-          timeout: TIMEOUT_MILLIS,
-        }
-      );
+      const queryParams: { pageSize: number; pageToken?: string } = { pageSize };
+      if (nextPageToken) {
+        queryParams.pageToken = nextPageToken;
+      }
+      const response = await apiClient.request<void, { instances: any[]; nextPageToken?: string }>({
+        method: "GET",
+        path: `/projects/${projectId}/locations/${location}/instances`,
+        queryParams,
+        timeout: TIMEOUT_MILLIS,
+      });
       if (response.body.instances) {
         instances.push(...response.body.instances.map(convertDatabaseInstance));
       }
@@ -256,7 +243,7 @@ export async function listDatabaseInstances(
     } while (nextPageToken);
 
     return instances;
-  } catch (err) {
+  } catch (err: any) {
     logger.debug(err.message);
     throw new FirebaseError(
       `Failed to list Firebase Realtime Database instances${
@@ -276,7 +263,7 @@ function convertDatabaseInstance(serverInstance: any): DatabaseInstance {
     throw new FirebaseError(`DatabaseInstance response is missing field "name"`);
   }
   const m = serverInstance.name.match(INSTANCE_RESOURCE_NAME_REGEX);
-  if (!m || m.length != 4) {
+  if (!m || m.length !== 4) {
     throw new FirebaseError(
       `Error parsing instance resource name: ${serverInstance.name}, matches: ${m}`
     );

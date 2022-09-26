@@ -2,16 +2,12 @@ import { promisify } from "util";
 import fetch from "node-fetch";
 import * as fs from "fs";
 import * as path from "path";
-import * as portfinder from "portfinder";
 import * as spawn from "cross-spawn";
 
 import { FirebaseError } from "../../../../error";
-import { Options } from "../../../../options";
 import { logger } from "../../../../logger";
-import * as args from "../../args";
 import * as backend from "../../backend";
-import * as discovery from "../discovery";
-import { needProjectId } from "../../../../projectUtils";
+import * as build from "../../build";
 import * as gomod from "./gomod";
 import * as runtimes from "..";
 
@@ -26,25 +22,24 @@ export const FUNCTIONS_SDK = "github.com/FirebaseExtended/firebase-functions-go"
 export const FUNCTIONS_CODEGEN = FUNCTIONS_SDK + "/support/codegen";
 export const FUNCTIONS_RUNTIME = FUNCTIONS_SDK + "/support/runtime";
 
+/**
+ *
+ */
 export async function tryCreateDelegate(
-  context: args.Context,
-  options: Options
+  context: runtimes.DelegateContext
 ): Promise<Delegate | undefined> {
-  const relativeSourceDir = options.config.get("functions.source") as string;
-  const sourceDir = options.config.path(relativeSourceDir);
-  const goModPath = path.join(sourceDir, "go.mod");
-  const projectId = needProjectId(options);
+  const goModPath = path.join(context.sourceDir, "go.mod");
 
   let module: gomod.Module;
   try {
     const modBuffer = await promisify(fs.readFile)(goModPath);
     module = gomod.parseModule(modBuffer.toString("utf8"));
-  } catch (err) {
+  } catch (err: any) {
     logger.debug("Customer code is not Golang code (or they aren't using gomod)");
     return;
   }
 
-  let runtime = options.config.get("functions.runtime");
+  let runtime = context.runtime;
   if (!runtime) {
     if (!module.version) {
       throw new FirebaseError("Could not detect Golang version from go.mod");
@@ -61,7 +56,7 @@ export async function tryCreateDelegate(
     runtime = VERSION_TO_RUNTIME[module.version];
   }
 
-  return new Delegate(projectId, sourceDir, runtime, module);
+  return new Delegate(context.projectId, context.sourceDir, runtime, module);
 }
 
 export class Delegate {
@@ -80,7 +75,7 @@ export class Delegate {
   async build(): Promise<void> {
     try {
       await promisify(fs.mkdir)(path.join(this.sourceDir, "autogen"));
-    } catch (err) {
+    } catch (err: any) {
       if (err?.code !== "EEXIST") {
         throw new FirebaseError("Failed to create codegen directory", { children: [err] });
       }
@@ -94,7 +89,7 @@ export class Delegate {
       },
       stdio: [/* stdin=*/ "ignore", /* stdout=*/ "pipe", /* stderr=*/ "pipe"],
     });
-    if (genBinary.status != 0) {
+    if (genBinary.status !== 0) {
       throw new FirebaseError("Failed to run codegen", {
         children: [new Error(genBinary.stderr.toString())],
       });
@@ -127,7 +122,7 @@ export class Delegate {
       cwd: this.sourceDir,
       stdio: [/* stdin=*/ "ignore", /* stdout=*/ "pipe", /* stderr=*/ "inherit"],
     });
-    childProcess.stdout.on("data", (chunk) => {
+    childProcess.stdout?.on("data", (chunk) => {
       logger.debug(chunk.toString());
     });
     return Promise.resolve(async () => {
@@ -138,7 +133,7 @@ export class Delegate {
 
       // If we SIGKILL the child process we're actually going to kill the go
       // runner and the webserver it launched will keep running.
-      await fetch(`http://localhost:${adminPort}/quitquitquit`);
+      await fetch(`http://localhost:${adminPort}/__/quitquitquit`);
       setTimeout(() => {
         if (!childProcess.killed) {
           childProcess.kill("SIGKILL");
@@ -148,25 +143,8 @@ export class Delegate {
     });
   }
 
-  async discoverSpec(
-    configValues: backend.RuntimeConfigValues,
-    envs: backend.EnvironmentVariables
-  ): Promise<backend.Backend> {
-    let discovered = await discovery.detectFromYaml(this.sourceDir, this.projectId, this.runtime);
-    if (!discovered) {
-      const getPort = promisify(portfinder.getPort) as () => Promise<number>;
-      const port = await getPort();
-      (portfinder as any).basePort = port + 1;
-      const adminPort = await getPort();
-
-      const kill = await this.serve(port, adminPort, envs);
-      try {
-        discovered = await discovery.detectFromPort(adminPort, this.projectId, this.runtime);
-      } finally {
-        await kill();
-      }
-    }
-    discovered.environmentVariables = envs;
-    return discovered;
+  async discoverBuild(): Promise<build.Build> {
+    // Unimplemented. Build discovery is not currently supported in Go.
+    return Promise.resolve({ requiredAPIs: [], endpoints: {}, params: [] });
   }
 }

@@ -1,4 +1,5 @@
 import { expect } from "chai";
+import * as sinon from "sinon";
 
 import * as utils from "../utils";
 
@@ -295,6 +296,158 @@ describe("utils", () => {
         { status: "rejected", reason: "fail fast" },
         { status: "fulfilled", value: 42 },
       ]);
+    });
+  });
+
+  describe("groupBy", () => {
+    it("should transform simple array by fn", () => {
+      const arr = [3.4, 1.2, 7.7, 2, 3.9];
+      expect(utils.groupBy(arr, Math.floor)).to.deep.equal({
+        1: [1.2],
+        2: [2],
+        3: [3.4, 3.9],
+        7: [7.7],
+      });
+    });
+
+    it("should transform array of objects by fn", () => {
+      const arr = [
+        { id: 1, location: "us" },
+        { id: 2, location: "us" },
+        { id: 3, location: "asia" },
+        { id: 4, location: "europe" },
+        { id: 5, location: "asia" },
+      ];
+      expect(utils.groupBy(arr, (obj) => obj.location)).to.deep.equal({
+        us: [
+          { id: 1, location: "us" },
+          { id: 2, location: "us" },
+        ],
+        asia: [
+          { id: 3, location: "asia" },
+          { id: 5, location: "asia" },
+        ],
+        europe: [{ id: 4, location: "europe" }],
+      });
+    });
+  });
+
+  describe("withTimeout", () => {
+    let clock: sinon.SinonFakeTimers;
+
+    beforeEach(() => {
+      clock = sinon.useFakeTimers();
+      clock.reset();
+    });
+
+    afterEach(() => {
+      clock.restore();
+    });
+
+    it("should fulfill if the original promise fulfills within timeout", async () => {
+      const promise = new Promise((resolve) => {
+        setTimeout(() => resolve("foo"), 1000);
+      });
+      const wrapped = utils.withTimeout(5000, promise);
+
+      clock.tick(1001);
+      await expect(wrapped).to.eventually.equal("foo");
+    });
+
+    it("should reject if the original promise rejects within timeout", async () => {
+      const promise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("oh snap")), 1000);
+      });
+      const wrapped = utils.withTimeout(5000, promise);
+
+      clock.tick(1001);
+      await expect(wrapped).to.be.rejectedWith("oh snap");
+    });
+
+    it("should reject with timeout if the original promise takes too long to fulfill", async () => {
+      const promise = new Promise((resolve) => {
+        setTimeout(() => resolve(42), 1000);
+      });
+      const wrapped = utils.withTimeout(5000, promise);
+
+      clock.tick(5001);
+      await expect(wrapped).to.be.rejectedWith("Timed out.");
+    });
+
+    it("should reject with timeout if the original promise takes too long to reject", async () => {
+      const promise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("oh snap")), 10000);
+      });
+      const wrapped = utils.withTimeout(5000, promise);
+
+      clock.tick(5001);
+      await expect(wrapped).to.be.rejectedWith("Timed out.");
+    });
+  });
+
+  describe("debounce", () => {
+    let clock: sinon.SinonFakeTimers;
+
+    beforeEach(() => {
+      clock = sinon.useFakeTimers();
+    });
+
+    afterEach(() => {
+      clock.restore();
+    });
+
+    it("should be called only once in the given time interval", () => {
+      const fn = sinon.stub();
+      const debounced = utils.debounce(fn, 1000);
+
+      for (let i = 0; i < 100; i++) {
+        debounced(i);
+      }
+
+      clock.tick(1001);
+      expect(fn).to.be.calledOnce;
+      expect(fn).to.be.calledOnceWith(99);
+    });
+
+    it("should be called only once if it is called many times within the interval", () => {
+      const fn = sinon.stub();
+      const debounced = utils.debounce(fn, 1000);
+
+      for (let i = 0; i < 100; i++) {
+        debounced(i);
+        clock.tick(999);
+      }
+
+      clock.tick(1001);
+      expect(fn).to.be.calledOnce;
+      expect(fn).to.be.calledOnceWith(99);
+    });
+
+    it("should be called only once within the interval if leading is provided", () => {
+      const fn = sinon.stub();
+      const debounced = utils.debounce(fn, 1000, { leading: true });
+
+      for (let i = 0; i < 100; i++) {
+        debounced(i);
+      }
+
+      clock.tick(999);
+      expect(fn).to.be.calledOnce;
+      expect(fn).to.be.calledOnceWith(0);
+    });
+
+    it("should be called twice with leading", () => {
+      const fn = sinon.stub();
+      const debounced = utils.debounce(fn, 1000, { leading: true });
+
+      for (let i = 0; i < 100; i++) {
+        debounced(i);
+      }
+
+      clock.tick(1500);
+      expect(fn).to.be.calledTwice;
+      expect(fn).to.be.calledWith(0);
+      expect(fn).to.be.calledWith(99);
     });
   });
 });

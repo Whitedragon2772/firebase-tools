@@ -5,7 +5,7 @@ import { sync as rimraf } from "rimraf";
 import { expect } from "chai";
 
 import * as env from "../../functions/env";
-import { previews } from "../../previews";
+import { FirebaseError } from "../../error";
 
 describe("functions/env", () => {
   describe("parse", () => {
@@ -53,6 +53,43 @@ BAR=bar
         description: "should parse double quoted with escaped newlines",
         input: 'FOO="foo1\\nfoo2"\nBAR=bar',
         want: { FOO: "foo1\nfoo2", BAR: "bar" },
+      },
+      {
+        description: "should parse escape sequences in order, from start to end",
+        input: `BAZ=baz
+ONE_NEWLINE="foo1\\nfoo2"
+ONE_BSLASH_AND_N="foo3\\\\nfoo4"
+ONE_BSLASH_AND_NEWLINE="foo5\\\\\\nfoo6"
+TWO_BSLASHES_AND_N="foo7\\\\\\\\nfoo8"
+BAR=bar`,
+        want: {
+          BAZ: "baz",
+          ONE_NEWLINE: "foo1\nfoo2",
+          ONE_BSLASH_AND_N: "foo3\\nfoo4",
+          ONE_BSLASH_AND_NEWLINE: "foo5\\\nfoo6",
+          TWO_BSLASHES_AND_N: "foo7\\\\nfoo8",
+          BAR: "bar",
+        },
+      },
+      {
+        description: "should parse double quoted with multiple escaped newlines",
+        input: 'FOO="foo1\\nfoo2\\nfoo3"\nBAR=bar',
+        want: { FOO: "foo1\nfoo2\nfoo3", BAR: "bar" },
+      },
+      {
+        description: "should parse double quoted with multiple escaped horizontal tabs",
+        input: 'FOO="foo1\\tfoo2\\tfoo3"\nBAR=bar',
+        want: { FOO: "foo1\tfoo2\tfoo3", BAR: "bar" },
+      },
+      {
+        description: "should parse double quoted with multiple escaped vertical tabs",
+        input: 'FOO="foo1\\vfoo2\\vfoo3"\nBAR=bar',
+        want: { FOO: "foo1\vfoo2\vfoo3", BAR: "bar" },
+      },
+      {
+        description: "should parse double quoted with multiple escaped carriage returns",
+        input: 'FOO="foo1\\rfoo2\\rfoo3"\nBAR=bar',
+        want: { FOO: "foo1\rfoo2\rfoo3", BAR: "bar" },
       },
       {
         description: "should leave single quotes when double quoted",
@@ -135,24 +172,39 @@ BAR=bar
         want: { FOO: "foo" },
       },
       {
+        description: "should handle empty values",
+        input: `
+FOO=
+BAR= "blah"
+`,
+        want: { FOO: "", BAR: "blah" },
+      },
+      {
+        description: "should handle quoted values after a newline",
+        input: `
+FOO=
+"blah"
+`,
+        want: { FOO: "blah" },
+      },
+      {
         description: "should ignore comments",
         input: `
-FOO=foo # comment
-# line comment 1
-# line comment 2
-BAR=bar # another comment
-`,
+      FOO=foo # comment
+      # line comment 1
+      # line comment 2
+      BAR=bar # another comment
+      `,
         want: { FOO: "foo", BAR: "bar" },
       },
       {
         description: "should ignore empty lines",
         input: `
-FOO=foo
+      FOO=foo
 
+      BAR=bar
 
-BAR=bar
-
-`,
+      `,
         want: { FOO: "foo", BAR: "bar" },
       },
     ];
@@ -224,25 +276,20 @@ FOO=foo
       expect(() => {
         env.validateKey("FIREBASE_FOOBAR");
       }).to.throw("starts with a reserved prefix");
+
+      expect(() => {
+        env.validateKey("EXT_INSTANCE_ID");
+      }).to.throw("starts with a reserved prefix");
     });
   });
 
-  describe("loadUserEnvs", () => {
+  describe("writeUserEnvs", () => {
     const createEnvFiles = (sourceDir: string, envs: Record<string, string>): void => {
       for (const [filename, data] of Object.entries(envs)) {
         fs.writeFileSync(path.join(sourceDir, filename), data);
       }
     };
-    const projectInfo = { projectId: "my-project", projectAlias: "dev" };
     let tmpdir: string;
-
-    before(() => {
-      previews.dotenv = true;
-    });
-
-    after(() => {
-      previews.dotenv = false;
-    });
 
     beforeEach(() => {
       tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "test"));
@@ -252,7 +299,159 @@ FOO=foo
       rimraf(tmpdir);
       expect(() => {
         fs.statSync(tmpdir);
-      }).to.throw;
+      }).to.throw();
+    });
+
+    it("never affects the filesystem if the list of keys to write is empty", () => {
+      env.writeUserEnvs(
+        {},
+        { projectId: "project", projectAlias: "alias", functionsSource: tmpdir }
+      );
+      expect(() => fs.statSync(path.join(tmpdir, ".env.alias"))).throw;
+    });
+
+    it("touches .env.projectId if it doesn't already exist", () => {
+      env.writeUserEnvs({ FOO: "bar" }, { projectId: "project", functionsSource: tmpdir });
+      expect(!!fs.statSync(path.join(tmpdir, ".env.project"))).to.be.true;
+    });
+
+    it("throws if asked to write a key that already exists in .env.projectId", () => {
+      createEnvFiles(tmpdir, {
+        [".env.project"]: "FOO=foo",
+      });
+      expect(() =>
+        env.writeUserEnvs({ FOO: "bar" }, { projectId: "project", functionsSource: tmpdir })
+      ).to.throw(FirebaseError);
+    });
+
+    it("throws if asked to write a key that already exists in any .env", () => {
+      createEnvFiles(tmpdir, {
+        [".env.alias"]: "BAR=foo",
+      });
+      expect(() =>
+        env.writeUserEnvs(
+          { FOO: "bar" },
+          { projectId: "project", projectAlias: "alias", functionsSource: tmpdir }
+        )
+      ).to.throw(FirebaseError);
+    });
+
+    it("throws if asked to write a key that fails key format validation", () => {
+      expect(() =>
+        env.writeUserEnvs(
+          { lowercase: "bar" },
+          { projectId: "project", projectAlias: "alias", functionsSource: tmpdir }
+        )
+      ).to.throw(env.KeyValidationError);
+      expect(() =>
+        env.writeUserEnvs(
+          { GCP_PROJECT: "bar" },
+          { projectId: "project", projectAlias: "alias", functionsSource: tmpdir }
+        )
+      ).to.throw(env.KeyValidationError);
+      expect(() =>
+        env.writeUserEnvs(
+          { FIREBASE_KEY: "bar" },
+          { projectId: "project", projectAlias: "alias", functionsSource: tmpdir }
+        )
+      ).to.throw(env.KeyValidationError);
+    });
+
+    it("writes the specified key to a .env.projectId that it created", () => {
+      env.writeUserEnvs(
+        { FOO: "bar" },
+        { projectId: "project", projectAlias: "alias", functionsSource: tmpdir }
+      );
+      expect(
+        env.loadUserEnvs({ projectId: "project", projectAlias: "alias", functionsSource: tmpdir })[
+          "FOO"
+        ]
+      ).to.equal("bar");
+    });
+
+    it("writes the specified key to a .env.projectId that already existed", () => {
+      createEnvFiles(tmpdir, {
+        [".env.project"]: "",
+      });
+      env.writeUserEnvs(
+        { FOO: "bar" },
+        { projectId: "project", projectAlias: "alias", functionsSource: tmpdir }
+      );
+      expect(
+        env.loadUserEnvs({ projectId: "project", projectAlias: "alias", functionsSource: tmpdir })[
+          "FOO"
+        ]
+      ).to.equal("bar");
+    });
+
+    it("writes multiple keys at once", () => {
+      env.writeUserEnvs(
+        { FOO: "foo", BAR: "bar" },
+        { projectId: "project", projectAlias: "alias", functionsSource: tmpdir }
+      );
+      const envs = env.loadUserEnvs({
+        projectId: "project",
+        projectAlias: "alias",
+        functionsSource: tmpdir,
+      });
+      expect(envs["FOO"]).to.equal("foo");
+      expect(envs["BAR"]).to.equal("bar");
+    });
+
+    it("escapes special characters so that parse() can reverse them", () => {
+      env.writeUserEnvs(
+        {
+          ESCAPES: "\n\r\t\v",
+          WITH_SLASHES: "\n\\\r\\\t\\\v",
+          QUOTES: "'\"'",
+        },
+        { projectId: "project", projectAlias: "alias", functionsSource: tmpdir }
+      );
+      const envs = env.loadUserEnvs({
+        projectId: "project",
+        projectAlias: "alias",
+        functionsSource: tmpdir,
+      });
+      expect(envs["ESCAPES"]).to.equal("\n\r\t\v");
+      expect(envs["WITH_SLASHES"]).to.equal("\n\\\r\\\t\\\v");
+      expect(envs["QUOTES"]).to.equal("'\"'");
+    });
+
+    it("shouldn't write anything if any of the keys fails key format validation", () => {
+      try {
+        env.writeUserEnvs(
+          { FOO: "bar", lowercase: "bar" },
+          { projectId: "project", functionsSource: tmpdir }
+        );
+      } catch (err: any) {
+        // no-op
+      }
+      expect(env.loadUserEnvs({ projectId: "project", functionsSource: tmpdir })["FOO"]).to.be
+        .undefined;
+    });
+  });
+
+  describe("loadUserEnvs", () => {
+    const createEnvFiles = (sourceDir: string, envs: Record<string, string>): void => {
+      for (const [filename, data] of Object.entries(envs)) {
+        fs.writeFileSync(path.join(sourceDir, filename), data);
+      }
+    };
+    const projectInfo: Omit<env.UserEnvsOpts, "functionsSource"> = {
+      projectId: "my-project",
+      projectAlias: "dev",
+    };
+    let tmpdir: string;
+
+    beforeEach(() => {
+      tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "test"));
+    });
+
+    afterEach(() => {
+      rimraf(tmpdir);
+      expect(() => {
+        fs.statSync(tmpdir);
+      }).to.throw();
     });
 
     it("loads nothing if .env files are missing", () => {
@@ -315,6 +514,20 @@ FOO=foo
       });
     });
 
+    it("loads envs, preferring ones from .env.<project> for emulators too", () => {
+      createEnvFiles(tmpdir, {
+        ".env": "FOO=bad\nBAR=bar",
+        [`.env.${projectInfo.projectId}`]: "FOO=good",
+      });
+
+      expect(
+        env.loadUserEnvs({ ...projectInfo, functionsSource: tmpdir, isEmulator: true })
+      ).to.be.deep.equal({
+        FOO: "good",
+        BAR: "bar",
+      });
+    });
+
     it("loads envs, preferring ones from .env.<alias>", () => {
       createEnvFiles(tmpdir, {
         ".env": "FOO=bad\nBAR=bar",
@@ -322,6 +535,48 @@ FOO=foo
       });
 
       expect(env.loadUserEnvs({ ...projectInfo, functionsSource: tmpdir })).to.be.deep.equal({
+        FOO: "good",
+        BAR: "bar",
+      });
+    });
+
+    it("loads envs, preferring ones from .env.<alias> for emulators too", () => {
+      createEnvFiles(tmpdir, {
+        ".env": "FOO=bad\nBAR=bar",
+        [`.env.${projectInfo.projectAlias}`]: "FOO=good",
+      });
+
+      expect(
+        env.loadUserEnvs({ ...projectInfo, functionsSource: tmpdir, isEmulator: true })
+      ).to.be.deep.equal({
+        FOO: "good",
+        BAR: "bar",
+      });
+    });
+
+    it("loads envs ignoring .env.local", () => {
+      createEnvFiles(tmpdir, {
+        ".env": "FOO=bad\nBAR=bar",
+        [`.env.${projectInfo.projectId}`]: "FOO=good",
+        ".env.local": "FOO=bad",
+      });
+
+      expect(env.loadUserEnvs({ ...projectInfo, functionsSource: tmpdir })).to.be.deep.equal({
+        FOO: "good",
+        BAR: "bar",
+      });
+    });
+
+    it("loads envs, preferring .env.local for the emulator", () => {
+      createEnvFiles(tmpdir, {
+        ".env": "FOO=bad\nBAR=bar",
+        [`.env.${projectInfo.projectId}`]: "FOO=another bad",
+        ".env.local": "FOO=good",
+      });
+
+      expect(
+        env.loadUserEnvs({ ...projectInfo, functionsSource: tmpdir, isEmulator: true })
+      ).to.be.deep.equal({
         FOO: "good",
         BAR: "bar",
       });

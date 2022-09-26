@@ -14,10 +14,10 @@ interface Operation {
   error?: any;
 }
 
-async function handler(op: Operation): Promise<undefined> {
+async function handler(op: Operation): Promise<void> {
   try {
     op.result = await op.func();
-  } catch (err) {
+  } catch (err: any) {
     // Throw retry functions back to the queue where they will be retried
     // with backoffs. To do this we cast a wide net for possible error codes.
     // These can be either TOO MANY REQUESTS (429) errors or CONFLICT (409)
@@ -30,7 +30,7 @@ async function handler(op: Operation): Promise<undefined> {
       err.context?.response?.statusCode ||
       err.original?.code ||
       err.original?.context?.response?.statusCode;
-    if (code === 429 || code === 409) {
+    if (code === 429 || code === 409 || code === 503) {
       throw err;
     }
     op.error = err;

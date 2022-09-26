@@ -3,7 +3,6 @@ import { FirebaseError } from "../error";
 import { runOrigin } from "../api";
 import * as proto from "./proto";
 import * as iam from "./iam";
-import * as _ from "lodash";
 
 const API_VERSION = "v1";
 
@@ -76,14 +75,27 @@ export interface ServiceStatus {
 
 export interface Service {
   apiVersion: "serving.knative.dev/v1";
-  kind: "service";
+  kind: "Service";
   metadata: ObjectMetadata;
   spec: ServiceSpec;
   status?: ServiceStatus;
 }
 
+export interface Container {
+  image: string;
+  ports: Array<{ name: string; containerPort: number }>;
+  env: Record<string, string>;
+  resources: {
+    limits: {
+      cpu: string;
+      memory: string;
+    };
+  };
+}
+
 export interface RevisionSpec {
   containerConcurrency?: number | null;
+  containers: Container[];
 }
 
 export interface RevisionTemplate {
@@ -113,22 +125,28 @@ export interface IamPolicy {
   etag?: string;
 }
 
+/**
+ * Gets a service with a given name.
+ */
 export async function getService(name: string): Promise<Service> {
   try {
     const response = await client.get<Service>(name);
     return response.body;
-  } catch (err) {
+  } catch (err: any) {
     throw new FirebaseError(`Failed to fetch Run service ${name}`, {
       original: err,
     });
   }
 }
 
+/**
+ * Replaces a service spec.
+ */
 export async function replaceService(name: string, service: Service): Promise<Service> {
   try {
     const response = await client.put<Service, Service>(name, service);
     return response.body;
-  } catch (err) {
+  } catch (err: any) {
     throw new FirebaseError(`Failed to update Run service ${name}`, {
       original: err,
     });
@@ -157,13 +175,16 @@ export async function setIamPolicy(
       policy,
       updateMask: proto.fieldMasks(policy).join(","),
     });
-  } catch (err) {
+  } catch (err: any) {
     throw new FirebaseError(`Failed to set the IAM Policy on the Service ${name}`, {
       original: err,
     });
   }
 }
 
+/**
+ * Gets IAM policy for a service.
+ */
 export async function getIamPolicy(
   serviceName: string,
   httpClient: Client = client
@@ -171,7 +192,7 @@ export async function getIamPolicy(
   try {
     const response = await httpClient.get<IamPolicy>(`${serviceName}:getIamPolicy`);
     return response.body;
-  } catch (err) {
+  } catch (err: any) {
     throw new FirebaseError(`Failed to get the IAM Policy on the Service ${serviceName}`, {
       original: err,
     });
@@ -183,7 +204,6 @@ export async function getIamPolicy(
  * @param projectId id of the project
  * @param serviceName cloud run service
  * @param invoker an array of invoker strings
- *
  * @throws {@link FirebaseError} on an empty invoker, when the IAM Polciy fails to be grabbed or set
  */
 export async function setInvokerCreate(
@@ -192,7 +212,7 @@ export async function setInvokerCreate(
   invoker: string[],
   httpClient: Client = client // for unit testing
 ) {
-  if (invoker.length == 0) {
+  if (invoker.length === 0) {
     throw new FirebaseError("Invoker cannot be an empty array");
   }
   const invokerMembers = proto.getInvokerMembers(invoker, projectId);
@@ -213,7 +233,6 @@ export async function setInvokerCreate(
  * @param projectId id of the project
  * @param serviceName cloud run service
  * @param invoker an array of invoker strings
- *
  * @throws {@link FirebaseError} on an empty invoker, when the IAM Polciy fails to be grabbed or set
  */
 export async function setInvokerUpdate(
@@ -222,7 +241,7 @@ export async function setInvokerUpdate(
   invoker: string[],
   httpClient: Client = client // for unit testing
 ) {
-  if (invoker.length == 0) {
+  if (invoker.length === 0) {
     throw new FirebaseError("Invoker cannot be an empty array");
   }
   const invokerMembers = proto.getInvokerMembers(invoker, projectId);

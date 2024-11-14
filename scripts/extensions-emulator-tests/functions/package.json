@@ -6,7 +6,7 @@
     "node": "14"
   },
   "dependencies": {
-    "firebase-admin": "^9.3.0",
+    "firebase-admin": "^13.0.0",
     "firebase-functions": "^3.22.0",
     "fs-extra": "^5.0.0",
     "rimraf": "^3.0.0"
